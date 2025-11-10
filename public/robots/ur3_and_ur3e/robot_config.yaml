@@ -1,0 +1,101 @@
+# 双臂机器人配置：UR3 + UR3e
+# 协作双臂系统配置
+
+dual_arm: true
+dual_arm_type: "two_urdf"  # 两个独立的URDF文件（与"single_urdf"格式不同）
+
+robot_name: "UR3 + UR3e Dual Arm System"
+description: "双臂协作机器人系统，包含一个UR3和一个UR3e（两个独立的URDF文件）"
+
+# 机器人1配置（UR3）
+robot1:
+  name: "UR3"
+  urdf_file: "ur3/ur3.urdf"
+  urdf_path: "ur3"
+  
+  joint_chain:
+    base_link: "base_link"
+    end_link: "ee_link"
+    joints:
+      - "shoulder_pan_joint"
+      - "shoulder_lift_joint"
+      - "elbow_joint"
+      - "wrist_1_joint"
+      - "wrist_2_joint"
+      - "wrist_3_joint"
+  
+  # 机器人1的基座位姿（相对于世界坐标系原点，Z-up）
+  # 格式：[qw, qx, qy, qz, tx, ty, tz] 或 [tx, ty, tz]
+  base_pose:  [-0.612384, -0.353533, -0.353533, 0.612384, -0.087881, 0.013986, -0.013986, -0.087881] # 平移：X=0.5m（右边）
+  effector_offset: [0, 0, 0.0819] 
+  
+  # MDH参数（如果自动提取失败，使用这些值）
+  mdh_extraction:
+    enabled: true
+    auto_extract: true
+
+  
+  initial_joint_angles: [-1.880045095815213, -2.795307177808226, -0.5964479412581589, -1.5539882438511055,  2.016087327992113, -0.3491149496371539]
+  
+# 机器人2配置（UR3e）
+robot2:
+  name: "UR3e"
+  urdf_file: "ur3e/ur3e.urdf"
+  urdf_path: "ur3e"
+  
+  joint_chain:
+    base_link: "base_link"
+    end_link: "ee_link"
+    joints:
+      - "shoulder_pan_joint"
+      - "shoulder_lift_joint"
+      - "elbow_joint"
+      - "wrist_1_joint"
+      - "wrist_2_joint"
+      - "wrist_3_joint"
+  
+  # 机器人2的基座位姿（相对于世界坐标系原点，Z-up）
+  base_pose:  [-0.612384, 0.353533, 0.353533, 0.612384, -0.087864, -0.013983, 0.013983, -0.087864] # 
+  effector_offset: [0, 0, 0.0819] 
+  # MDH参数
+  mdh_extraction:
+    enabled: true
+    auto_extract: true
+    
+  
+  initial_joint_angles: [1.875556372520332, -0.4101345299593827, 0.7340619962523387, -1.7073878143999608, -2.0509990890852294, 3.4525046361701044]
+
+# 双臂系统配置
+dual_arm_config:
+  # 绝对位姿（两个末端执行器的平均位置）
+  # 计算方式：absolute_pose = (pose1 + pose2) / 2
+  # 这里的配置只是说明，实际由WASM计算
+  
+  # 相对位姿（robot1末端到robot2末端的相对变换）
+  # 计算方式：relative_pose = pose2 * pose1^(-1)
+  # 这里的配置只是说明，实际由WASM计算
+  
+  # 相对位姿增益（用于控制）
+  relative_gain: 0.5
+
+# 可视化配置
+visualization:
+  robot1_color: "#3b82f6"      # 蓝色 - UR3
+  robot2_color: "#10b981"      # 绿色 - UR3e
+  absolute_pose_color: "#fbbf24"  # 黄色 - 绝对位姿标记
+  relative_pose_color: "#ef4444"  # 红色 - 相对位姿连线
+  show_absolute_pose: true
+  show_relative_pose: true
+  end_effector_size: 0.02
+
+# 预设位姿
+presets:
+  home:
+    robot1: [0, 0, 0, 0, 0, 0]
+    robot2: [0, 0, 0, 0, 0, 0]
+  cooperative:
+    robot1: [0, -1.2, 1.8, -2.2, -1.57, 0]
+    robot2: [0, -1.2, 1.8, -2.2, -1.57, 0]
+  opposite:
+    robot1: [1.57, 0, 0, 0, 0, 0]
+    robot2: [-1.57, 0, 0, 0, 0, 0]

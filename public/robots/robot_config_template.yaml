@@ -1,0 +1,76 @@
+# DQ Robotics 机器人配置文件
+# 将此文件重命名为 robot_config.yaml 并放在 URDF 文件夹中
+
+# 机器人基本信息
+robot_name: "Custom Robot"
+description: "自定义机器人描述"
+
+# URDF 文件名（相对于配置文件）
+urdf_file: "robot.urdf"
+
+# 关节链定义（从基座到末端）
+# 重要：按照运动学链的顺序列出关节名称
+joint_chain:
+  base_link: "base_link"        # 基座连杆名称
+  end_link: "end_effector_link" # 末端连杆名称
+  
+  # 关节名称列表（按顺序）
+  joints:
+    - "joint1"
+    - "joint2"
+    - "joint3"
+    - "joint4"
+    - "joint5"
+    - "joint6"
+    - "joint7"
+
+# 关节限位（可选）
+joint_limits:
+  # 格式: [最小值, 最大值] (弧度)
+  joint1: [-2.8973, 2.8973]
+  joint2: [-1.7628, 1.7628]
+  joint3: [-2.8973, 2.8973]
+  joint4: [-3.0718, -0.0698]
+  joint5: [-2.8973, 2.8973]
+  joint6: [-0.0175, 3.7525]
+  joint7: [-2.8973, 2.8973]
+
+# 初始关节角度（可选）
+initial_joint_angles: [0, 0, 0, 0, 0, 0, 0]
+
+# 预设位姿（可选）
+presets:
+  home: [0, 0, 0, 0, 0, 0, 0]
+  extended: [0, -0.5, 0, -2.1, 0, 1.57, 0.785]
+  folded: [0, 0.5, 0, -1.5, 0, 1.0, 0]
+
+# # MDH 参数提取选项
+# mdh_extraction:
+#   enabled: true
+#   auto_extract: true  # 自动从 URDF 提取
+#   verify: true        # 验证提取的参数
+
+# 可视化选项
+visualization:
+  show_axes: true
+  show_end_effector: true
+  end_effector_size: 0.05
+  link_color: "#eeeeee"
+  joint_color: "#888888"
+
+mdh_extraction:
+  auto_extract: false
+  manual_mdh:
+    - [0, 0.333, 0, 0]              # 关节1
+    - [0, 0, 0, -1.5708]            # 关节2
+    - [0, 0.316, 0, 1.5708]         # 关节3 ✓
+    - [0, 0, 0.0825, 1.5708]        # 关节4
+    - [0, 0.384, -0.0825, -1.5708]  # 关节5 ✓
+    - [0, 0, 0, 1.5708]             # 关节6
+    - [0, 0, 0.088, 1.5708]         # 关节7
+# 注释：
+# 1. base_link: 运动学链的起始连杆
+# 2. end_link: 运动学链的末端连杆
+# 3. joints: 必须按照从基座到末端的顺序列出
+# 4. 所有名称必须与 URDF 文件中的定义完全匹配
+

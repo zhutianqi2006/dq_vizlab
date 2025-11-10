@@ -1,0 +1,62 @@
+
+robot1_name: "Universal Robots UR3e"
+description: "6-DOF 协作机器人，负载3kg"
+
+# URDF 文件名（放在同一目录下）
+urdf_file: "ur3e.urdf"
+
+joint_chain:
+  base_link: "base_link"
+  end_link: "ee_link"
+  
+  # UR3 的6个关节（根据实际URDF调整名称）
+  # 常见命名方式1: shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint
+  # 常见命名方式2: ur3_joint1, ur3_joint2, ur3_joint3, ur3_joint4, ur3_joint5, ur3_joint6
+  joints:
+    - "shoulder_pan_joint"
+    - "shoulder_lift_joint"
+    - "elbow_joint"
+    - "wrist_1_joint"
+    - "wrist_2_joint"
+    - "wrist_3_joint"
+
+# 关节限位（弧度）
+# 来源: UR3 官方规格
+joint_limits:
+  shoulder_pan_joint: [-6.2832, 6.2832]     # ±360°
+  shoulder_lift_joint: [-6.2832, 6.2832]    # ±360°
+  elbow_joint: [-3.1416, 3.1416]            # ±180°
+  wrist_1_joint: [-6.2832, 6.2832]          # ±360°
+  wrist_2_joint: [-6.2832, 6.2832]          # ±360°
+  wrist_3_joint: [-6.2832, 6.2832]          # ±360°
+
+# 初始关节角度（零位）
+initial_joint_angles: [0, 0, 0, 0, 0, 0]
+
+# 预设位姿
+presets:
+  home: [0, 0, 0, 0, 0, 0]
+  extended: [0, -1.57, 1.57, 0, 0, 0]
+  folded: [0, -2.2, 2.2, -1.57, 0, 0]
+
+# MDH 参数提取配置
+mdh_extraction:
+  enabled: true
+  auto_extract: true  # 自动从 URDF 提取
+  verify: true        # 验证提取的参数
+  effector_offset: [0, 0, 0.0819]
+  #base_pose: [0, 0, 0]
+  # 末端执行器偏移（可选）
+  # UR3 的 tool0 通常就在法兰面，如果需要额外偏移可以在这里配置
+  
+  
+  # 基座偏移（可选）
+  
+
+# 可视化配置
+visualization:
+  show_axes: true
+  show_end_effector: true
+  end_effector_size: 0.01
+  link_color: "#cccccc"
+  joint_color: "#666666"

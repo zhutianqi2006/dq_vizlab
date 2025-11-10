@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DQ Robotics 可视化</title>
+    <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+    <!-- 3D渲染画布（全屏） -->
+    <canvas id="robot-canvas"></canvas>
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>正在加载 WASM 模块...</p>
+    </div>
+
+    <!-- 左侧浮动控制面板 -->
+    <div class="floating-panel control-panel" id="control-panel">
+        <div class="panel-header">
+            <h2>控制面板</h2>
+            <button class="panel-toggle" id="control-toggle">−</button>
+        </div>
+        <div class="panel-body">
+                <div class="panel-section">
+                    <h2>关节控制</h2>
+                    <div id="joint-controls">
+                        <!-- 动态生成的关节滑块 -->
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>预设位姿</h2>
+                    <div class="preset-buttons">
+                        <button class="preset-btn" data-preset="home">初始位置</button>
+                        <button class="preset-btn" data-preset="extended">伸展姿态</button>
+                        <button class="preset-btn" data-preset="folded">折叠姿态</button>
+                        <button class="preset-btn" data-preset="random">随机位置</button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>DQ 演示</h2>
+                    <div class="dq-demo">
+                        <button id="dq-rotation-demo" class="demo-btn">旋转演示</button>
+                        <button id="dq-translation-demo" class="demo-btn">平移演示</button>
+                        <button id="dq-pose-demo" class="demo-btn">位姿演示</button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>URDF → MDH</h2>
+                    <div class="dq-demo">
+                        <button id="extract-mdh-btn" class="demo-btn">从URDF提取MDH</button>
+                        <button id="compare-mdh-btn" class="demo-btn">对比MDH参数</button>
+                        <button id="use-urdf-mdh-btn" class="demo-btn">使用URDF的MDH</button>
+                    </div>
+                    <div id="mdh-status" class="mdh-status"></div>
+                    <div style="margin-top: 1rem;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="show-mdh-frames-toggle">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">显示MDH坐标系</span>
+                        </label>
+                    </div>
+                    <div style="margin-top: 1rem;">
+                        <h3 style="margin-bottom: 0.5rem; font-size: 0.9rem; color: #cbd5e1;">末端执行器控制</h3>
+                        <div id="dual-arm-control-mode" style="margin-bottom: 0.75rem; display: none;">
+                            <label class="toggle-switch" style="font-size: 0.85rem;">
+                                <input type="checkbox" id="dual-arm-relative-mode-toggle">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">相对位姿模式</span>
+                            </label>
+                            <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
+                                <span id="dual-arm-mode-label">绝对位姿模式：控制绝对位姿，保持相对位姿不变</span>
+                            </div>
+                            <label class="toggle-switch" style="font-size: 0.85rem; margin-top: 0.5rem;">
+                                <input type="checkbox" id="dual-arm-nullspace-toggle">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">零空间优化</span>
+                            </label>
+                            <div id="dual-arm-nullspace-status" style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
+                                零空间优化：关闭
+                            </div>
+                        </div>
+                        <div class="teach-pendant-controls">
+                            <div class="axis-control-group">
+                                <div class="axis-label">X轴</div>
+                                <button class="teach-btn teach-btn-negative" data-axis="x" data-direction="negative">X-</button>
+                                <button class="teach-btn teach-btn-positive" data-axis="x" data-direction="positive">X+</button>
+                            </div>
+                            <div class="axis-control-group">
+                                <div class="axis-label">Y轴</div>
+                                <button class="teach-btn teach-btn-negative" data-axis="y" data-direction="negative">Y-</button>
+                                <button class="teach-btn teach-btn-positive" data-axis="y" data-direction="positive">Y+</button>
+                            </div>
+                            <div class="axis-control-group">
+                                <div class="axis-label">Z轴</div>
+                                <button class="teach-btn teach-btn-negative" data-axis="z" data-direction="negative">Z-</button>
+                                <button class="teach-btn teach-btn-positive" data-axis="z" data-direction="positive">Z+</button>
+                            </div>
+                            <div class="axis-control-group">
+                                <div class="axis-label">Rx</div>
+                                <button class="teach-btn teach-btn-negative" data-axis="rx" data-direction="negative" data-type="rotation">Rx-</button>
+                                <button class="teach-btn teach-btn-positive" data-axis="rx" data-direction="positive" data-type="rotation">Rx+</button>
+                            </div>
+                            <div class="axis-control-group">
+                                <div class="axis-label">Ry</div>
+                                <button class="teach-btn teach-btn-negative" data-axis="ry" data-direction="negative" data-type="rotation">Ry-</button>
+                                <button class="teach-btn teach-btn-positive" data-axis="ry" data-direction="positive" data-type="rotation">Ry+</button>
+                            </div>
+                            <div class="axis-control-group">
+                                <div class="axis-label">Rz</div>
+                                <button class="teach-btn teach-btn-negative" data-axis="rz" data-direction="negative" data-type="rotation">Rz-</button>
+                                <button class="teach-btn teach-btn-positive" data-axis="rz" data-direction="positive" data-type="rotation">Rz+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+        </div>
+    </div>
+
+    <!-- 右下角浮动信息面板 -->
+    <div class="floating-panel info-panel" id="info-panel">
+        <div class="panel-header">
+            <h2>机器人状态</h2>
+            <button class="panel-toggle" id="info-toggle">−</button>
+        </div>
+        <div class="panel-body">
+            <div class="info-panel-content">
+                    <div class="info-tabs">
+                        <button class="tab-btn active" data-tab="pose">末端位姿</button>
+                        <button class="tab-btn" data-tab="jacobian">雅可比矩阵</button>
+                        <button class="tab-btn" data-tab="dq">DQ 表示</button>
+                    </div>
+
+                    <div class="tab-content">
+                        <!-- 单臂模式显示 -->
+                        <div id="pose-tab" class="tab-pane active single-arm-pose">
+                            <h3>末端执行器位姿</h3>
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label>位置 (m)</label>
+                                    <div class="value-display">
+                                        <span>X: <code id="pos-x">0.000</code></span>
+                                        <span>Y: <code id="pos-y">0.000</code></span>
+                                        <span>Z: <code id="pos-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label>旋转四元数</label>
+                                    <div class="value-display">
+                                        <span>W: <code id="quat-w">1.000</code></span>
+                                        <span>X: <code id="quat-x">0.000</code></span>
+                                        <span>Y: <code id="quat-y">0.000</code></span>
+                                        <span>Z: <code id="quat-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label>欧拉角 (deg)</label>
+                                    <div class="value-display">
+                                        <span>Roll: <code id="euler-roll">0.0</code></span>
+                                        <span>Pitch: <code id="euler-pitch">0.0</code></span>
+                                        <span>Yaw: <code id="euler-yaw">0.0</code></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 双臂模式显示 -->
+                        <div id="dual-arm-pose-tab" class="tab-pane dual-arm-pose" style="display: none;">
+                            <h3>双臂机器人位姿</h3>
+                            
+                            <!-- 机器人1位姿 -->
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label style="color: #3b82f6;">机器人1位置 (m)</label>
+                                    <div class="value-display">
+                                        <span>X: <code id="robot1-pos-x">0.000</code></span>
+                                        <span>Y: <code id="robot1-pos-y">0.000</code></span>
+                                        <span>Z: <code id="robot1-pos-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #3b82f6;">机器人1四元数</label>
+                                    <div class="value-display">
+                                        <span>W: <code id="robot1-quat-w">1.000</code></span>
+                                        <span>X: <code id="robot1-quat-x">0.000</code></span>
+                                        <span>Y: <code id="robot1-quat-y">0.000</code></span>
+                                        <span>Z: <code id="robot1-quat-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #3b82f6;">机器人1 DQ</label>
+                                    <div class="dq-display-small" id="robot1-dq">
+                                        <div>实部: <code id="robot1-dq-primary">0 0 0 0</code></div>
+                                        <div>对偶: <code id="robot1-dq-dual">0 0 0 0</code></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 机器人2位姿 -->
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label style="color: #10b981;">机器人2位置 (m)</label>
+                                    <div class="value-display">
+                                        <span>X: <code id="robot2-pos-x">0.000</code></span>
+                                        <span>Y: <code id="robot2-pos-y">0.000</code></span>
+                                        <span>Z: <code id="robot2-pos-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #10b981;">机器人2四元数</label>
+                                    <div class="value-display">
+                                        <span>W: <code id="robot2-quat-w">1.000</code></span>
+                                        <span>X: <code id="robot2-quat-x">0.000</code></span>
+                                        <span>Y: <code id="robot2-quat-y">0.000</code></span>
+                                        <span>Z: <code id="robot2-quat-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #10b981;">机器人2 DQ</label>
+                                    <div class="dq-display-small" id="robot2-dq">
+                                        <div>实部: <code id="robot2-dq-primary">0 0 0 0</code></div>
+                                        <div>对偶: <code id="robot2-dq-dual">0 0 0 0</code></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 绝对位姿 -->
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label style="color: #fbbf24;">绝对位姿位置 (m)</label>
+                                    <div class="value-display">
+                                        <span>X: <code id="absolute-pos-x">0.000</code></span>
+                                        <span>Y: <code id="absolute-pos-y">0.000</code></span>
+                                        <span>Z: <code id="absolute-pos-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #fbbf24;">绝对位姿四元数</label>
+                                    <div class="value-display">
+                                        <span>W: <code id="absolute-quat-w">1.000</code></span>
+                                        <span>X: <code id="absolute-quat-x">0.000</code></span>
+                                        <span>Y: <code id="absolute-quat-y">0.000</code></span>
+                                        <span>Z: <code id="absolute-quat-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #fbbf24;">绝对位姿 DQ</label>
+                                    <div class="dq-display-small" id="absolute-dq">
+                                        <div>实部: <code id="absolute-dq-primary">0 0 0 0</code></div>
+                                        <div>对偶: <code id="absolute-dq-dual">0 0 0 0</code></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 相对位姿 -->
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label style="color: #ef4444;">相对位姿位置 (m)</label>
+                                    <div class="value-display">
+                                        <span>X: <code id="relative-pos-x">0.000</code></span>
+                                        <span>Y: <code id="relative-pos-y">0.000</code></span>
+                                        <span>Z: <code id="relative-pos-z">0.000</code></span>
+                                    </div>
+                                    <div style="font-size: 0.75rem; color: #666; margin-top: 0.25rem;">
+                                        距离: <code id="relative-distance">0.000</code> m
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #ef4444;">相对位姿四元数</label>
+                                    <div class="value-display">
+                                        <span>W: <code id="relative-quat-w">1.000</code></span>
+                                        <span>X: <code id="relative-quat-x">0.000</code></span>
+                                        <span>Y: <code id="relative-quat-y">0.000</code></span>
+                                        <span>Z: <code id="relative-quat-z">0.000</code></span>
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label style="color: #ef4444;">相对位姿 DQ</label>
+                                    <div class="dq-display-small" id="relative-dq">
+                                        <div>实部: <code id="relative-dq-primary">0 0 0 0</code></div>
+                                        <div>对偶: <code id="relative-dq-dual">0 0 0 0</code></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="jacobian-tab" class="tab-pane">
+                            <h3>位姿雅可比矩阵</h3>
+                            <div class="matrix-display" id="jacobian-matrix">
+                                <!-- 动态生成 -->
+                            </div>
+                        </div>
+
+                        <div id="dq-tab" class="tab-pane">
+                            <h3>双四元数表示</h3>
+                            <div class="dq-display">
+                                <div class="info-item">
+                                    <label>实部 (Primary)</label>
+                                    <div class="value-display dq-values" id="dq-primary">
+                                        <!-- 动态生成 -->
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <label>对偶部 (Dual)</label>
+                                    <div class="value-display dq-values" id="dq-dual">
+                                        <!-- 动态生成 -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部功能栏 -->
+    <div id="bottom-dock" class="bottom-dock">
+        <button class="dock-item" data-panel="control-panel">
+            <span class="dock-icon">🎛️</span>
+            <span class="dock-label">控制面板</span>
+        </button>
+        <button class="dock-item" data-panel="info-panel">
+            <span class="dock-icon">📊</span>
+            <span class="dock-label">信息面板</span>
+        </button>
+    </div>
+
+    <!-- 全局拖拽提示 -->
+    <div id="drop-overlay" class="drop-overlay hidden">
+        <div class="drop-overlay-content">
+            <span class="drop-overlay-icon">📁</span>
+            <p class="drop-overlay-text">拖拽 URDF 文件夹到页面任意位置以加载</p>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
+

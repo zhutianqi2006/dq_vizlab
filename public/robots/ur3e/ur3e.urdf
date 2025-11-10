@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Universal Robots UR3e URDF -->
+<!-- 使用真实 mesh 模型 -->
+<robot name="ur3e">
+
+  <!-- 材质定义 -->
+  <material name="ur_silver">
+    <color rgba="0.9 0.9 0.92 1"/>
+  </material>
+  
+  <material name="ur_grey">
+    <color rgba="0.7 0.7 0.8 1"/>
+  </material>
+
+  <!-- 基座连杆 -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="2."/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/base.dae"/>
+      </geometry>
+      <material name="ur_silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/base.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- 肩部连杆 -->
+  <link name="shoulder_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="2."/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/shoulder.dae"/>
+      </geometry>
+      <material name="ur_silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/shoulder.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="shoulder_pan_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+    <origin xyz="0. 0. 0.1519" rpy="0. 0. 0."/>
+    <axis xyz="0. 0. 1."/>
+    <limit lower="-6.2831853" upper="6.2831853" effort="330." velocity="2.1600001"/>
+  </joint>
+
+  <!-- 上臂连杆 -->
+  <link name="upper_arm_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="3.4200001"/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/upperarm.dae"/>
+      </geometry>
+      <material name="ur_silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/upperarm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="shoulder_lift_joint" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0. 0.1198 0. " rpy="0. 1.5707963 0. "/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="-6.2831853" upper="6.2831853" effort="330." velocity="2.1600001"/>
+  </joint>
+
+  <!-- 前臂连杆 -->
+  <link name="forearm_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="1.26"/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/forearm.dae"/>
+      </geometry>
+      <material name="ur_silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/forearm.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="elbow_joint" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="0. -0.0925 0.24365" rpy="0. 0. 0."/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="-6.2831853" upper="3.1415927" effort="150." velocity="3.15"/>
+  </joint>
+
+  <!-- 腕部1连杆 -->
+  <link name="wrist_1_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="0.8"/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/wrist1.dae"/>
+      </geometry>
+      <material name="ur_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/wrist1.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="wrist_1_joint" type="revolute">
+    <parent link="forearm_link"/>
+    <child link="wrist_1_link"/>
+    <origin xyz="0. 0. 0.21325" rpy="0. 1.5707963 0. "/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="-6.2831853" upper="6.2831853" effort="54." velocity="3.2"/>
+  </joint>
+
+  <!-- 腕部2连杆 -->
+  <link name="wrist_2_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="0.8"/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/wrist2.dae"/>
+      </geometry>
+      <material name="ur_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/wrist2.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="wrist_2_joint" type="revolute">
+    <parent link="wrist_1_link"/>
+    <child link="wrist_2_link"/>
+    <origin xyz="0. 0.08505 0. " rpy="0. 0. 0."/>
+    <axis xyz="0. 0. 1."/>
+    <limit lower="-6.2831853" upper="6.2831853" effort="54." velocity="3.2"/>
+  </joint>
+
+  <!-- 腕部3连杆（法兰） -->
+  <link name="wrist_3_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="0.35"/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/visual/wrist3.dae"/>
+      </geometry>
+      <material name="ur_silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="meshes/collision/wrist3.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="wrist_3_joint" type="revolute">
+    <parent link="wrist_2_link"/>
+    <child link="wrist_3_link"/>
+    <origin xyz="0. 0. 0.08535" rpy="0. 0. 0."/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="-6.2831853" upper="6.2831853" effort="54." velocity="3.2"/>
+  </joint>
+
+
+  <joint name="ee_fixed_joint" type="fixed">
+    <parent link="wrist_3_link"/>
+    <child link="ee_link"/>
+    <origin xyz="0. 0.0819 0. " rpy="0. 0. 1.5707964"/>
+  </joint>
+
+
+    <!-- 末端执行器参考点 -->
+  <link name="ee_link">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="0.000001"/>
+      <inertia ixx="0." ixy="0." ixz="0." iyy="0." iyz="0." izz="0."/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.01 0. 0. " rpy="0. 0. 0."/>
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.01 0. 0. " rpy="0. 0. 0."/>
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+    </collision>
+  </link>
+
+</robot>

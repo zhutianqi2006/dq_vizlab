@@ -1,0 +1,67 @@
+# Franka Emika Panda 机器人配置
+
+robot_name: "Franka Emika Panda"
+description: "7-DOF 协作机器人"
+
+urdf_file: "panda_simplified.urdf"
+
+joint_chain:
+  base_link: "panda_link0"
+  end_link: "panda_link8"
+  
+  joints:
+    - "panda_joint1"
+    - "panda_joint2"
+    - "panda_joint3"
+    - "panda_joint4"
+    - "panda_joint5"
+    - "panda_joint6"
+    - "panda_joint7"
+
+joint_limits:
+  panda_joint1: [-2.8973, 2.8973]
+  panda_joint2: [-1.7628, 1.7628]
+  panda_joint3: [-2.8973, 2.8973]
+  panda_joint4: [-3.0718, -0.0698]
+  panda_joint5: [-2.8973, 2.8973]
+  panda_joint6: [-0.0175, 3.7525]
+  panda_joint7: [-2.8973, 2.8973]
+
+initial_joint_angles: [0, 0, 0, 0, 0, 0, 0]
+
+presets:
+  home: [0, 0, 0, 0, 0, 0, 0]
+  extended: [0, -0.5, 0, -2.1, 0, 1.57, 0.785]
+  folded: [0, 0.5, 0, -1.5, 0, 1.0, 0]
+
+mdh_extraction:
+  enabled: true
+  auto_extract: true  # 自动从 URDF 提取
+  verify: true        # 验证提取的参数
+  base_offset: [0, 0, 0]  # 基座偏移已禁用
+  
+  # 末端执行器偏移（可选）：从 end_link 到实际工具中心点的偏移
+  # 格式: [x, y, z] 在 Z-up 坐标系下，或者完整的姿态 [qw, qx, qy, qz, tx, ty, tz]
+  # 示例：
+  # effector_offset: [0.041, 0, 0]  # 简单平移：X方向41mm
+  # effector_offset: [1, 0, 0, 0, 0.041, 0, 0.107]  # 完整姿态：平移+旋转
+  # effector_offset: [0, 0, 0]  # 无偏移
+
+# mdh_extraction:
+#   auto_extract: false
+#   manual_mdh:
+#     - [0, 0.333, 0, 0]              # 关节1
+#     - [0, 0, 0, -1.5708]            # 关节2
+#     - [0, 0.316, 0, 1.5708]         # 关节3 ✓
+#     - [0, 0, 0.0825, 1.5708]        # 关节4
+#     - [0, 0.384, -0.0825, -1.5708]  # 关节5 ✓
+#     - [0, 0, 0, 1.5708]             # 关节6
+#     - [0, 0, 0.088, 1.5708]         # 关节7
+
+visualization:
+  show_axes: true
+  show_end_effector: true
+  end_effector_size: 0.04
+  link_color: "#eeeeee"
+  joint_color: "#888888"
+

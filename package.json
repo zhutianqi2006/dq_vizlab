@@ -1,0 +1,31 @@
+{
+  "name": "dq-vizlab",
+  "version": "1.0.0",
+  "description": "DQ Robotics 可视化实验室 - 基于 WebAssembly 的机器人运动学可视化平台",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:wasm": "./build.sh"
+  },
+  "keywords": [
+    "robotics",
+    "dual-quaternion",
+    "wasm",
+    "webassembly",
+    "kinematics",
+    "visualization"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "three": "^0.160.1",
+    "three-stdlib": "^2.36.0",
+    "urdf-loader": "^0.12.6"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
