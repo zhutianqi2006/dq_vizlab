@@ -6,11 +6,11 @@ pnpm-lock.yaml
 # 构建输出
 dist/
 build/
-*.wasm
 *.js.mem
-
 # WASM 输出
-public/wasm/
+!public/wasm/
+!public/wasm/*.wasm
+!public/wasm/*.js
 
 # 但保留机器人模型文件
 !public/robots/
