@@ -207,13 +207,14 @@ export class RobotVisualizer {
     async loadURDFRobot() {
         try {
             const loader = new URDFLoader();
+            const baseUrl = import.meta.env.BASE_URL || '/';
             loader.packages = {
-                'franka_description': '/robots/franka'
+                'franka_description': `${baseUrl}robots/franka`
             };
             
             this.urdfRobot = await new Promise((resolve, reject) => {
                 loader.load(
-                    '/robots/franka/panda_simplified.urdf',
+                    `${baseUrl}robots/franka/panda_simplified.urdf`,
                     (robot) => {
                         console.log('✓ URDF 加载成功');
                         console.log('关节数:', Object.keys(robot.joints).length);

@@ -171,7 +171,8 @@ async function initRobot(robotType) {
         
         // 尝试加载Franka配置文件以获取关节限位
         try {
-            const response = await fetch('/robots/franka/robot_config.yaml');
+            const baseUrl = import.meta.env.BASE_URL || '/';
+            const response = await fetch(`${baseUrl}robots/franka/robot_config.yaml`);
             if (response.ok) {
                 const yaml = await import('js-yaml');
                 const text = await response.text();
@@ -2444,7 +2445,8 @@ async function applyPreset(preset) {
     } else if (currentRobotType === 'franka') {
         // 对于内置Franka，尝试加载配置文件获取限位
         try {
-            const response = await fetch('/robots/franka/robot_config.yaml');
+            const baseUrl = import.meta.env.BASE_URL || '/';
+            const response = await fetch(`${baseUrl}robots/franka/robot_config.yaml`);
             if (response.ok) {
                 const yaml = await import('js-yaml');
                 const text = await response.text();
