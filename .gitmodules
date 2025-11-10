@@ -1,0 +1,6 @@
+[submodule "eigen"]
+	path = eigen
+	url = https://github.com/eigenteam/eigen-git-mirror.git
+[submodule "dqrobotics-cpp"]
+	path = dqrobotics-cpp
+	url = https://github.com/dqrobotics/cpp

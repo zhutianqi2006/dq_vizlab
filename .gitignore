@@ -10,12 +10,6 @@ build/
 *.wasm
 *.js.mem
 
-# DQ Robotics C++ 库
-dqrobotics-cpp/
-
-# Eigen 库
-eigen/
-
 # WASM 输出
 public/wasm/
 
