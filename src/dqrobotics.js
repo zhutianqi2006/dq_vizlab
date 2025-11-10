@@ -18,7 +18,7 @@ export async function initDQRobotics() {
     try {
         // 使用 script 标签加载 WASM 模块
         // Vite 不允许直接从 /public 导入 JS 文件
-        const scriptUrl = '/wasm/dqrobotics.js';
+        const scriptUrl = `${import.meta.env.BASE_URL}wasm/dqrobotics.js`;
         
         // 检查是否已加载
         if (typeof window.createDQRoboticsModule === 'function') {
