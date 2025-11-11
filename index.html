@@ -23,6 +23,14 @@
         <div class="panel-body">
                 <div class="panel-section">
                     <h2>关节控制</h2>
+                    <div class="joint-controls-toolbar" style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <button id="copy-joint-angles-btn" class="demo-btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem;">
+                            复制关节角度
+                        </button>
+                        <button id="angle-unit-toggle" class="demo-btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem;">
+                            切换为弧度
+                        </button>
+                    </div>
                     <div id="joint-controls">
                         <!-- 动态生成的关节滑块 -->
                     </div>
@@ -35,6 +43,11 @@
                         <button class="preset-btn" data-preset="extended">伸展姿态</button>
                         <button class="preset-btn" data-preset="folded">折叠姿态</button>
                         <button class="preset-btn" data-preset="random">随机位置</button>
+                    </div>
+                    <div class="preset-buttons" style="margin-top: 0.75rem; display: flex; gap: 0.5rem; justify-content: flex-end;">
+                        <button id="copy-joint-limits-btn" class="demo-btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem;">
+                            复制关节限位
+                        </button>
                     </div>
                 </div>
 
@@ -73,13 +86,15 @@
                             <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
                                 <span id="dual-arm-mode-label">绝对位姿模式：控制绝对位姿，保持相对位姿不变</span>
                             </div>
-                            <label class="toggle-switch" style="font-size: 0.85rem; margin-top: 0.5rem;">
-                                <input type="checkbox" id="dual-arm-nullspace-toggle">
+                        </div>
+                        <div style="margin-bottom: 0.75rem;">
+                            <label class="toggle-switch" style="font-size: 0.85rem;">
+                                <input type="checkbox" id="teach-multiply-order-toggle" checked>
                                 <span class="toggle-slider"></span>
-                                <span class="toggle-label">零空间优化</span>
+                                <span class="toggle-label">局部增量（Δ × 当前）</span>
                             </label>
-                            <div id="dual-arm-nullspace-status" style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
-                                零空间优化：关闭
+                            <div id="teach-multiply-order-status" style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
+                                当前模式：局部坐标（Δ × 当前）
                             </div>
                         </div>
                         <div class="teach-pendant-controls">

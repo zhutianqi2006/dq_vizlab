@@ -67,6 +67,9 @@ export class RobotVisualizer {
         this.selectedArrow = null;  // 当前选中的箭头
         this.arrowType = null;  // 'translation' 或 'rotation'
         this.arrowAxis = null;  // 'x', 'y', 或 'z'
+
+        // 示教器乘法顺序（默认局部增量：Δ × 当前）
+        this.teachMultiplicationOrder = 'delta-first';
     }
     
     /**
@@ -178,6 +181,35 @@ export class RobotVisualizer {
         this.animate();
         
         console.log('✓ 可视化器初始化完成（Z-up 坐标系）');
+    }
+
+    /**
+     * 设置示教器乘法顺序
+     * @param {'delta-first'|'current-first'} order 
+     */
+    setTeachMultiplicationOrder(order) {
+        if (order !== 'delta-first' && order !== 'current-first') {
+            console.warn('无效的乘法顺序设置:', order);
+            return;
+        }
+        this.teachMultiplicationOrder = order;
+        console.log(`示教器乘法顺序已设置为: ${order === 'delta-first' ? 'Δ × 当前' : '当前 × Δ'}`);
+    }
+
+    /**
+     * 根据乘法顺序组合双四元数
+     * @param {*} dqDelta - 增量双四元数
+     * @param {*} dqCurrent - 当前双四元数
+     * @returns {*} 组合后的双四元数
+     */
+    combineDQWithTeachOrder(dqDelta, dqCurrent) {
+        if (!window.DQModule || !window.DQModule.DQWrapper) {
+            throw new Error('DQ Robotics 模块未加载');
+        }
+        if (this.teachMultiplicationOrder === 'current-first') {
+            return window.DQModule.DQWrapper.multiply(dqCurrent, dqDelta);
+        }
+        return window.DQModule.DQWrapper.multiply(dqDelta, dqCurrent);
     }
     
     /**
@@ -2190,7 +2222,7 @@ export class RobotVisualizer {
             const dqAbsoluteCurrent = window.DQModule.DQWrapper.createFromArray(dqAbsoluteCurrentArray);
             
             // 计算目标绝对位姿
-            const dqAbsoluteTarget = window.DQModule.DQWrapper.multiply(dqDelta, dqAbsoluteCurrent);
+            const dqAbsoluteTarget = this.combineDQWithTeachOrder(dqDelta, dqAbsoluteCurrent);
             const dqAbsoluteTargetArray = window.DQModule.DQWrapper.toArray(dqAbsoluteTarget);
             
             // 使用迭代求解
@@ -2333,6 +2365,132 @@ export class RobotVisualizer {
         }
     }
     
+
+    updateDualArmJointsFromAbsolutePoseTarget2(dqAbsoluteTargetArray, currentJointAngles, dqRelativeCurrentArray = null) {
+        if (!window.dualArmSystem || !currentJointAngles || currentJointAngles.length === 0) return;
+        
+        try {
+            // 获取当前相对位姿（如果未提供）
+            if (!dqRelativeCurrentArray) {
+                dqRelativeCurrentArray = window.dualArmSystem.getRelativePose(currentJointAngles);
+            }
+            
+            // 迭代求解参数
+            const epsilon = 0.0000001;
+            const maxIterations = 50;
+            const damping = 0.5;
+            
+            let q = [...currentJointAngles];
+            let errNorm = epsilon + 1;
+            let iteration = 0;
+            
+            while (errNorm > epsilon && iteration < maxIterations) {
+                // 获取当前绝对位姿和相对位姿
+                const dqAbsoluteCurrentIterArray = window.dualArmSystem.getAbsolutePose(q);
+                const dqRelativeCurrentIterArray = window.dualArmSystem.getRelativePose(q);
+                
+                // 计算误差向量
+                // 绝对位姿误差（8元素）
+                const errAbsolute = [];
+                for (let i = 0; i < 8; i++) {
+                    errAbsolute.push(dqAbsoluteTargetArray[i] - dqAbsoluteCurrentIterArray[i]);
+                }
+                
+                // 相对位姿误差（保持为0，即保持相对位姿不变）
+                const errRelative = [];
+                for (let i = 0; i < 8; i++) {
+                    errRelative.push(dqRelativeCurrentArray[i] - dqRelativeCurrentIterArray[i]);
+                }
+                
+                // 组合误差向量：[err_abs; err_rel]（16元素）
+                const err = [...errAbsolute, ...errRelative];
+                
+                // 计算误差范数
+                errNorm = Math.sqrt(err.reduce((sum, e) => sum + e * e, 0));
+                
+                if (errNorm <= epsilon) {
+                    break;
+                }
+                
+                // 获取雅可比矩阵
+                // 绝对位姿雅可比（8xN）
+                const jacobianAbsolute = window.dualArmSystem.getAbsolutePoseJacobian(q);
+                // 相对位姿雅可比（8xN）
+                const jacobianRelative = window.dualArmSystem.getRelativePoseJacobian(q);
+                
+                // 组合雅可比矩阵：[J_abs; J_rel]（16xN）
+                const jacobian = [];
+                for (let i = 0; i < jacobianAbsolute.length; i++) {
+                    jacobian.push([...jacobianAbsolute[i]]);
+                }
+                for (let i = 0; i < jacobianRelative.length; i++) {
+                    jacobian.push([...jacobianRelative[i]]);
+                }
+                
+                // 计算雅可比伪逆
+                const jacobianPseudoInv = this.pseudoInverse(jacobian);
+                
+                // 计算关节角度增量：dq = pinv(J) * damping * err
+                const deltaJoints = [];
+                for (let i = 0; i < jacobianPseudoInv.length; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < err.length; j++) {
+                        sum += jacobianPseudoInv[i][j] * err[j] * damping;
+                    }
+                    deltaJoints.push(sum);
+                }
+                
+                // 更新关节角度
+                for (let i = 0; i < q.length && i < deltaJoints.length; i++) {
+                    q[i] += deltaJoints[i];
+                }
+                
+                iteration++;
+            }
+            
+            // 分离关节角度
+            const robot1JointCount = window.jointAngles1.length;
+            const robot2JointCount = window.jointAngles2.length;
+            
+            // 限制关节角度
+            if (window.customRobotConfig) {
+                const jointNames1 = window.customRobotConfig?.robot1?.joint_chain?.joints || [];
+                const jointNames2 = window.customRobotConfig?.robot2?.joint_chain?.joints || [];
+                
+                const q1 = q.slice(0, robot1JointCount);
+                const q2 = q.slice(robot1JointCount, robot1JointCount + robot2JointCount);
+                
+                if (window.clampJointAngles) {
+                    const clampedQ1 = window.clampJointAngles(q1, jointNames1, this.robot1URDF, window.customRobotConfig?.robot1);
+                    const clampedQ2 = window.clampJointAngles(q2, jointNames2, this.robot2URDF, window.customRobotConfig?.robot2);
+                    q = [...clampedQ1, ...clampedQ2];
+                }
+            }
+            
+            // 更新全局关节角度
+            const q1 = q.slice(0, robot1JointCount);
+            const q2 = q.slice(robot1JointCount, robot1JointCount + robot2JointCount);
+            
+            for (let i = 0; i < window.jointAngles1.length && i < q1.length; i++) {
+                window.jointAngles1[i] = q1[i];
+            }
+            for (let i = 0; i < window.jointAngles2.length && i < q2.length; i++) {
+                window.jointAngles2[i] = q2[i];
+            }
+            
+            // 同步到 main.js
+            if (window.updateGlobalVariables) {
+                window.updateGlobalVariables();
+            }
+            
+            // 更新机器人位姿
+            if (window.updateRobotPose) {
+                window.updateRobotPose();
+            }
+        } catch (error) {
+            console.error('更新双臂关节角度失败:', error);
+        }
+    }
     /**
      * 沿指定轴方向移动双臂相对位姿（示教器模式，使用零空间保持绝对位姿不变）
      * @param {string} axis - 轴名称：'x', 'y', 或 'z'
@@ -2493,7 +2651,7 @@ export class RobotVisualizer {
             const dqRelativeCurrent = window.DQModule.DQWrapper.createFromArray(dqRelativeCurrentArray);
             
             // 计算目标相对位姿
-            const dqRelativeTarget = window.DQModule.DQWrapper.multiply(dqDelta, dqRelativeCurrent);
+            const dqRelativeTarget = this.combineDQWithTeachOrder(dqDelta, dqRelativeCurrent);
             const dqRelativeTargetArray = window.DQModule.DQWrapper.toArray(dqRelativeTarget);
             
             // 使用迭代求解
@@ -2894,16 +3052,14 @@ export class RobotVisualizer {
             const dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
             const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
             
-            // 3. 计算目标位姿：dq_target = dq_delta * dq_current
-            // 注意：在世界坐标系中，先应用平移再应用当前位姿
-            // 由于 dq_delta 是纯平移（旋转部分为单位四元数），dq_target 的旋转部分与 dq_current 相同
-            const dqTarget = window.DQModule.DQWrapper.multiply(dqDelta, dqCurrent);
+            // 3. 计算目标位姿
+            const dqTarget = this.combineDQWithTeachOrder(dqDelta, dqCurrent);
             
             // 4. 保存目标位姿数组
             const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
             
             // 5. 迭代求解逆运动学（参考 MATLAB 的 while 循环）
-            const epsilon = 0.001;  // 停止条件：误差范数小于此值
+            const epsilon = 0.0001;  // 停止条件：误差范数小于此值
             const maxIterations = 50;  // 最大迭代次数，防止无限循环
             const damping = 0.5;  // 阻尼系数（与MATLAB一致）
             

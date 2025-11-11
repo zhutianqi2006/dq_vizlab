@@ -8,6 +8,12 @@ import { RobotVisualizer } from './visualizer.js';
 import { extractMDHFromURDF, createMDHTestSuite, FRANKA_PANDA_MDH_REFERENCE, formatMDHForDQ } from './urdf-to-mdh.js';
 import { URDFPackageManager, loadURDFFromPackage } from './urdf-loader.js';
 
+const RAD_TO_DEG = 180 / Math.PI;
+const DEG_TO_RAD = Math.PI / 180;
+
+let angleDisplayMode = 'rad';
+let frankaConfigCache = null;
+
 // 全局状态
 let currentRobot = null;
 let currentRobotType = 'franka';
@@ -38,6 +44,151 @@ let robot2URDF = null;  // 机器人2（URDF）
 let jointAngles1 = [];  // 机器人1关节角度
 let jointAngles2 = [];  // 机器人2关节角度
 let dualArmSystem = null;  // CooperativeDualArm对象（用于计算绝对位姿）
+
+function angleToDisplay(angleRad) {
+    if (!Number.isFinite(angleRad)) {
+        return 0;
+    }
+    return angleDisplayMode === 'deg' ? angleRad * RAD_TO_DEG : angleRad;
+}
+
+function displayToAngle(displayValue) {
+    if (!Number.isFinite(displayValue)) {
+        return 0;
+    }
+    return angleDisplayMode === 'deg' ? displayValue * DEG_TO_RAD : displayValue;
+}
+
+function getSliderPrecision() {
+    return angleDisplayMode === 'deg' ? 1 : 3;
+}
+
+function getInputPrecision() {
+    return angleDisplayMode === 'deg' ? 2 : 4;
+}
+
+function displayStep() {
+    return angleDisplayMode === 'deg' ? 0.1 : 0.01;
+}
+
+function getAnglePlaceholder() {
+    return angleDisplayMode === 'deg' ? '角度(°)' : '角度(rad)';
+}
+
+function formatDisplayValue(value, digits) {
+    const safeValue = Number.isFinite(value) ? value : 0;
+    return safeValue.toFixed(digits);
+}
+
+function formatDisplayAngle(angleRad, digits = getInputPrecision()) {
+    return formatDisplayValue(angleToDisplay(angleRad), digits);
+}
+
+function getActiveJointConfig() {
+    return customRobotConfig || frankaConfigCache;
+}
+
+function buildJointAnglesClipboardText() {
+    const digits = angleDisplayMode === 'deg' ? 3 : 5;
+    const formatList = (angles = []) => {
+        const list = Array.isArray(angles) ? angles : Array.from(angles || []);
+        const formatted = list.map(a => parseFloat(angleToDisplay(a ?? 0).toFixed(digits)));
+        return `[${formatted.join(', ')}]`;
+    };
+
+    if (dualArmMode) {
+        const robot1 = formatList(jointAngles1);
+        const robot2 = formatList(jointAngles2);
+        return `robot1=${robot1}\nrobot2=${robot2}`;
+    }
+
+    return formatList(jointAngles);
+}
+
+function formatJointLimitsForClipboard(lowerAngles = [], upperAngles = [], label = 'joint') {
+    const listLower = Array.isArray(lowerAngles) ? lowerAngles : Array.from(lowerAngles || []);
+    const listUpper = Array.isArray(upperAngles) ? upperAngles : Array.from(upperAngles || []);
+    const digits = angleDisplayMode === 'deg' ? 3 : 5;
+    const lowerDisplay = listLower.map(a => parseFloat(angleToDisplay(a ?? 0).toFixed(digits)));
+    const upperDisplay = listUpper.map(a => parseFloat(angleToDisplay(a ?? 0).toFixed(digits)));
+    const prefix = angleDisplayMode === 'deg' ? '' : '';
+    return `${label}_q_min: [${lowerDisplay.join(', ')}]\n${label}_q_max: [${upperDisplay.join(', ')}]`;
+}
+
+function buildJointLimitsClipboardText() {
+    const config = getActiveJointConfig();
+    const formatLimits = (jointNames = [], urdfRobotRef = null, configRef = null, label = 'joint') => {
+        const lower = [];
+        const upper = [];
+        jointNames.forEach(name => {
+            const limits = getJointLimits(name, urdfRobotRef, configRef);
+            lower.push(limits.lower);
+            upper.push(limits.upper);
+        });
+        return formatJointLimitsForClipboard(lower, upper, label);
+    };
+
+    if (dualArmMode && config) {
+        const jointNames1 = config.robot1?.joint_chain?.joints || [];
+        const jointNames2 = config.robot2?.joint_chain?.joints || [];
+        const text1 = formatLimits(jointNames1, visualizer?.robot1URDF || null, config.robot1, 'robot1');
+        const text2 = formatLimits(jointNames2, visualizer?.robot2URDF || null, config.robot2, 'robot2');
+        return `${text1}\n${text2}`;
+    }
+
+    const jointNames = config?.joint_chain?.joints || [];
+    return formatLimits(jointNames, visualizer?.urdfRobot || null, config, 'joint');
+}
+
+async function copyJointLimitsToClipboard() {
+    const text = buildJointLimitsClipboardText();
+    if (!text) {
+        throw new Error('无法获取关节限位');
+    }
+
+    if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const succeeded = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!succeeded) {
+        throw new Error('复制失败');
+    }
+    return true;
+}
+
+async function copyJointAnglesToClipboard() {
+    const text = buildJointAnglesClipboardText();
+    if (!text) {
+        throw new Error('无法获取关节角度');
+    }
+    
+    if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+    }
+    
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const succeeded = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!succeeded) {
+        throw new Error('复制失败');
+    }
+    return true;
+}
 /**
  * 计算末端固定偏移：查找紧邻 end_link 的固定关节的 origin
  * @param {Object} robot - URDF 机器人对象
@@ -186,6 +337,7 @@ async function initRobot(robotType) {
         currentRobot = new KukaLw4();
         currentRobotIsYUp = false;
     }
+    frankaConfigCache = robotType === 'franka' ? frankaConfig : null;
     
     const numJoints = currentRobot.getDimConfigurationSpace();
     
@@ -295,8 +447,32 @@ function clampJointAngles(angles, jointNames, urdfRobot, config) {
  * @param {number} upperDeg - 上限（度）
  * @param {Function} onUpdate - 更新回调函数，接收角度（弧度）
  */
-function setupJointInput(input, sliderId, lowerDeg, upperDeg, onUpdate) {
+function setupJointInput(input, sliderId, lowerRad, upperRad, onUpdate) {
     let inputTimeout = null;
+    const sliderPrecision = getSliderPrecision();
+    const inputPrecision = getInputPrecision();
+    const displayLower = angleToDisplay(lowerRad);
+    const displayUpper = angleToDisplay(upperRad);
+    
+    const clampDisplayValue = (value) => {
+        if (!Number.isFinite(value)) {
+            return displayLower;
+        }
+        return Math.max(displayLower, Math.min(displayUpper, value));
+    };
+    
+    const commitValue = (displayValue) => {
+        const clampedDisplay = clampDisplayValue(displayValue);
+        const angleRad = displayToAngle(clampedDisplay);
+        
+        const slider = document.getElementById(sliderId);
+        if (slider) {
+            slider.value = formatDisplayValue(clampedDisplay, sliderPrecision);
+        }
+        
+        input.value = formatDisplayValue(clampedDisplay, inputPrecision);
+        onUpdate(angleRad);
+    };
     
     input.addEventListener('input', (e) => {
         if (inputTimeout) {
@@ -311,20 +487,12 @@ function setupJointInput(input, sliderId, lowerDeg, upperDeg, onUpdate) {
                 return;
             }
 
-            const angleDeg = parseFloat(rawValue);
-            if (isNaN(angleDeg)) {
+            const displayValue = parseFloat(rawValue);
+            if (Number.isNaN(displayValue)) {
                 return;
             }
 
-            const clampedDeg = Math.max(lowerDeg, Math.min(upperDeg, angleDeg));
-            const angleRad = clampedDeg * Math.PI / 180;
-
-            const slider = document.getElementById(sliderId);
-            if (slider) {
-                slider.value = clampedDeg.toFixed(1);
-            }
-
-            onUpdate(angleRad);
+            commitValue(displayValue);
         }, 200);
     });
     
@@ -335,41 +503,23 @@ function setupJointInput(input, sliderId, lowerDeg, upperDeg, onUpdate) {
             }
             const angleDeg = parseFloat(e.target.value);
             if (!isNaN(angleDeg)) {
-                const clampedDeg = Math.max(lowerDeg, Math.min(upperDeg, angleDeg));
-                const angleRad = clampedDeg * Math.PI / 180;
-                
-                const slider = document.getElementById(sliderId);
-                if (slider) {
-                    slider.value = clampedDeg.toFixed(1);
-                }
-                
-                input.value = clampedDeg.toFixed(2);
-                onUpdate(angleRad);
+                commitValue(angleDeg);
             }
             e.target.blur();
         }
     });
     
     input.addEventListener('blur', (e) => {
-        const angleDeg = parseFloat(e.target.value);
-        if (isNaN(angleDeg)) {
+        const displayValue = parseFloat(e.target.value);
+        if (Number.isNaN(displayValue)) {
             // 恢复当前值（从滑块获取）
             const slider = document.getElementById(sliderId);
             if (slider) {
-                const currentDeg = parseFloat(slider.value);
-                e.target.value = currentDeg.toFixed(2);
+                const currentDisplay = parseFloat(slider.value);
+                e.target.value = formatDisplayValue(currentDisplay, inputPrecision);
             }
         } else {
-            const clampedDeg = Math.max(lowerDeg, Math.min(upperDeg, angleDeg));
-            const angleRad = clampedDeg * Math.PI / 180;
-            e.target.value = clampedDeg.toFixed(2);
-            
-            const slider = document.getElementById(sliderId);
-            if (slider) {
-                slider.value = clampedDeg.toFixed(1);
-            }
-            
-            onUpdate(angleRad);
+            commitValue(displayValue);
         }
     });
 }
@@ -399,8 +549,11 @@ function createJointControls(numJoints, config = null) {
         
         // 获取关节限位
         const limits = getJointLimits(jointName, urdfRobot, config);
-        const lowerDeg = limits.lower * 180 / Math.PI;
-        const upperDeg = limits.upper * 180 / Math.PI;
+        const lowerRad = limits.lower;
+        const upperRad = limits.upper;
+        const sliderPrecision = getSliderPrecision();
+        const inputPrecision = getInputPrecision();
+        const step = displayStep().toString();
         
         // 创建标签行（关节名称 + 输入框）
         const label = document.createElement('div');
@@ -414,14 +567,14 @@ function createJointControls(numJoints, config = null) {
         input.type = 'number';
         input.className = 'joint-input';
         input.id = `joint-input-${i}`;
-        input.value = '0.00';
-        input.step = '0.1';
-        input.min = lowerDeg.toFixed(1);
-        input.max = upperDeg.toFixed(1);
-        input.placeholder = '角度(°)';
+        input.step = step;
+        input.min = formatDisplayValue(angleToDisplay(lowerRad), sliderPrecision);
+        input.max = formatDisplayValue(angleToDisplay(upperRad), sliderPrecision);
+        input.placeholder = getAnglePlaceholder();
+        input.value = formatDisplayAngle(jointAngles[i] ?? 0);
         
         // 输入框事件处理
-        setupJointInput(input, `joint-${i}`, lowerDeg, upperDeg, (angleRad) => {
+        setupJointInput(input, `joint-${i}`, lowerRad, upperRad, (angleRad) => {
             jointAngles[i] = angleRad;
             if (window.updateGlobalVariables) {
                 window.updateGlobalVariables();
@@ -436,18 +589,21 @@ function createJointControls(numJoints, config = null) {
         slider.type = 'range';
         slider.className = 'joint-slider';
         slider.id = `joint-${i}`;
-        slider.min = lowerDeg.toFixed(1);
-        slider.max = upperDeg.toFixed(1);
-        slider.value = '0';
-        slider.step = '0.1';
+        slider.min = formatDisplayValue(angleToDisplay(lowerRad), sliderPrecision);
+        slider.max = formatDisplayValue(angleToDisplay(upperRad), sliderPrecision);
+        slider.step = step;
+        slider.value = formatDisplayValue(angleToDisplay(jointAngles[i] ?? 0), sliderPrecision);
         
         slider.addEventListener('input', (e) => {
-            const angleDeg = parseFloat(e.target.value);
-            const angleRad = angleDeg * Math.PI / 180;
+            const displayValue = parseFloat(e.target.value);
+            if (Number.isNaN(displayValue)) {
+                return;
+            }
+            const angleRad = displayToAngle(displayValue);
             jointAngles[i] = angleRad;
             
             // 更新输入框
-            input.value = angleDeg.toFixed(2);
+            input.value = formatDisplayValue(displayValue, inputPrecision);
             
             // 同步全局变量
             if (window.updateGlobalVariables) {
@@ -472,22 +628,25 @@ function createJointControls(numJoints, config = null) {
 function updateJointSlidersFromAngles() {
     if (!jointAngles || jointAngles.length === 0) return;
     
+    const sliderPrecision = getSliderPrecision();
+    const inputPrecision = getInputPrecision();
+    const step = displayStep().toString();
+    const placeholder = getAnglePlaceholder();
+    
     jointAngles.forEach((angle, i) => {
-        const angleDeg = angle * 180 / Math.PI;
+        const displayValue = angleToDisplay(angle);
         const slider = document.getElementById(`joint-${i}`);
         const input = document.getElementById(`joint-input-${i}`);
         
         if (slider) {
-            // 确保滑块值在min和max范围内
-            const min = parseFloat(slider.min);
-            const max = parseFloat(slider.max);
-            const clampedDeg = Math.max(min, Math.min(max, angleDeg));
-            slider.value = clampedDeg.toFixed(1);
-            
-            // 更新输入框
-            if (input) {
-                input.value = clampedDeg.toFixed(2);
-            }
+            slider.value = formatDisplayValue(displayValue, sliderPrecision);
+            slider.step = step;
+        }
+        
+        if (input) {
+            input.value = formatDisplayValue(displayValue, inputPrecision);
+            input.step = step;
+            input.placeholder = placeholder;
         }
     });
 }
@@ -519,8 +678,11 @@ function createDualArmJointControls(config) {
         
         // 获取关节限位（优先从配置文件，其次从URDF）
         const limits = getJointLimits(jointName, robot1URDF, config.robot1);
-        const lowerDeg = limits.lower * 180 / Math.PI;
-        const upperDeg = limits.upper * 180 / Math.PI;
+        const lowerRad = limits.lower;
+        const upperRad = limits.upper;
+        const sliderPrecision = getSliderPrecision();
+        const inputPrecision = getInputPrecision();
+        const step = displayStep().toString();
         
         // 创建标签行（关节名称 + 输入框）
         const label = document.createElement('div');
@@ -534,14 +696,14 @@ function createDualArmJointControls(config) {
         input.type = 'number';
         input.className = 'joint-input';
         input.id = `joint1-input-${i}`;
-        input.value = '0.00';
-        input.step = '0.1';
-        input.min = lowerDeg.toFixed(1);
-        input.max = upperDeg.toFixed(1);
-        input.placeholder = '角度(°)';
+        input.step = step;
+        input.min = formatDisplayValue(angleToDisplay(lowerRad), sliderPrecision);
+        input.max = formatDisplayValue(angleToDisplay(upperRad), sliderPrecision);
+        input.placeholder = getAnglePlaceholder();
+        input.value = formatDisplayAngle(jointAngles1[i] ?? 0);
         
         // 输入框事件处理（与单臂模式相同的逻辑）
-        setupJointInput(input, `joint1-${i}`, lowerDeg, upperDeg, (angleRad) => {
+        setupJointInput(input, `joint1-${i}`, lowerRad, upperRad, (angleRad) => {
             jointAngles1[i] = angleRad;
             updateRobotPose();
         });
@@ -553,16 +715,19 @@ function createDualArmJointControls(config) {
         slider.type = 'range';
         slider.className = 'joint-slider';
         slider.id = `joint1-${i}`;
-        slider.min = lowerDeg.toFixed(1);
-        slider.max = upperDeg.toFixed(1);
-        slider.value = '0';
-        slider.step = '0.1';
+        slider.min = formatDisplayValue(angleToDisplay(lowerRad), sliderPrecision);
+        slider.max = formatDisplayValue(angleToDisplay(upperRad), sliderPrecision);
+        slider.step = step;
+        slider.value = formatDisplayValue(angleToDisplay(jointAngles1[i] ?? 0), sliderPrecision);
         
         slider.addEventListener('input', (e) => {
-            const angleDeg = parseFloat(e.target.value);
-            const angleRad = angleDeg * Math.PI / 180;
+            const displayValue = parseFloat(e.target.value);
+            if (Number.isNaN(displayValue)) {
+                return;
+            }
+            const angleRad = displayToAngle(displayValue);
             jointAngles1[i] = angleRad;
-            input.value = angleDeg.toFixed(2);
+            input.value = formatDisplayValue(displayValue, inputPrecision);
             updateRobotPose();
         });
         
@@ -589,8 +754,11 @@ function createDualArmJointControls(config) {
         
         // 获取关节限位（优先从配置文件，其次从URDF）
         const limits = getJointLimits(jointName, robot2URDF, config.robot2);
-        const lowerDeg = limits.lower * 180 / Math.PI;
-        const upperDeg = limits.upper * 180 / Math.PI;
+        const lowerRad = limits.lower;
+        const upperRad = limits.upper;
+        const sliderPrecision = getSliderPrecision();
+        const inputPrecision = getInputPrecision();
+        const step = displayStep().toString();
         
         // 创建标签行（关节名称 + 输入框）
         const label = document.createElement('div');
@@ -604,14 +772,14 @@ function createDualArmJointControls(config) {
         input.type = 'number';
         input.className = 'joint-input';
         input.id = `joint2-input-${i}`;
-        input.value = '0.00';
-        input.step = '0.1';
-        input.min = lowerDeg.toFixed(1);
-        input.max = upperDeg.toFixed(1);
-        input.placeholder = '角度(°)';
+        input.step = step;
+        input.min = formatDisplayValue(angleToDisplay(lowerRad), sliderPrecision);
+        input.max = formatDisplayValue(angleToDisplay(upperRad), sliderPrecision);
+        input.placeholder = getAnglePlaceholder();
+        input.value = formatDisplayAngle(jointAngles2[i] ?? 0);
         
         // 输入框事件处理
-        setupJointInput(input, `joint2-${i}`, lowerDeg, upperDeg, (angleRad) => {
+        setupJointInput(input, `joint2-${i}`, lowerRad, upperRad, (angleRad) => {
             jointAngles2[i] = angleRad;
             updateRobotPose();
         });
@@ -623,16 +791,19 @@ function createDualArmJointControls(config) {
         slider.type = 'range';
         slider.className = 'joint-slider';
         slider.id = `joint2-${i}`;
-        slider.min = lowerDeg.toFixed(1);
-        slider.max = upperDeg.toFixed(1);
-        slider.value = '0';
-        slider.step = '0.1';
+        slider.min = formatDisplayValue(angleToDisplay(lowerRad), sliderPrecision);
+        slider.max = formatDisplayValue(angleToDisplay(upperRad), sliderPrecision);
+        slider.step = step;
+        slider.value = formatDisplayValue(angleToDisplay(jointAngles2[i] ?? 0), sliderPrecision);
         
         slider.addEventListener('input', (e) => {
-            const angleDeg = parseFloat(e.target.value);
-            const angleRad = angleDeg * Math.PI / 180;
+            const displayValue = parseFloat(e.target.value);
+            if (Number.isNaN(displayValue)) {
+                return;
+            }
+            const angleRad = displayToAngle(displayValue);
             jointAngles2[i] = angleRad;
-            input.value = angleDeg.toFixed(2);
+            input.value = formatDisplayValue(displayValue, inputPrecision);
             updateRobotPose();
         });
         
@@ -651,22 +822,27 @@ function createDualArmJointControls(config) {
  * 从当前双臂关节角度更新所有滑块的值和显示
  */
 function updateDualArmJointSlidersFromAngles() {
+    const sliderPrecision = getSliderPrecision();
+    const inputPrecision = getInputPrecision();
+    const step = displayStep().toString();
+    const placeholder = getAnglePlaceholder();
+    
     // 更新机器人1的滑块和输入框
     if (jointAngles1 && jointAngles1.length > 0) {
         jointAngles1.forEach((angle, i) => {
-            const angleDeg = angle * 180 / Math.PI;
+            const displayValue = angleToDisplay(angle);
             const slider = document.getElementById(`joint1-${i}`);
             const input = document.getElementById(`joint1-input-${i}`);
             
             if (slider) {
-                const min = parseFloat(slider.min);
-                const max = parseFloat(slider.max);
-                const clampedDeg = Math.max(min, Math.min(max, angleDeg));
-                slider.value = clampedDeg.toFixed(1);
-                
-                if (input) {
-                    input.value = clampedDeg.toFixed(2);
-                }
+                slider.value = formatDisplayValue(displayValue, sliderPrecision);
+                slider.step = step;
+            }
+            
+            if (input) {
+                input.value = formatDisplayValue(displayValue, inputPrecision);
+                input.step = step;
+                input.placeholder = placeholder;
             }
         });
     }
@@ -674,21 +850,48 @@ function updateDualArmJointSlidersFromAngles() {
     // 更新机器人2的滑块和输入框
     if (jointAngles2 && jointAngles2.length > 0) {
         jointAngles2.forEach((angle, i) => {
-            const angleDeg = angle * 180 / Math.PI;
+            const displayValue = angleToDisplay(angle);
             const slider = document.getElementById(`joint2-${i}`);
             const input = document.getElementById(`joint2-input-${i}`);
             
             if (slider) {
-                const min = parseFloat(slider.min);
-                const max = parseFloat(slider.max);
-                const clampedDeg = Math.max(min, Math.min(max, angleDeg));
-                slider.value = clampedDeg.toFixed(1);
-                
-                if (input) {
-                    input.value = clampedDeg.toFixed(2);
-                }
+                slider.value = formatDisplayValue(displayValue, sliderPrecision);
+                slider.step = step;
+            }
+            
+            if (input) {
+                input.value = formatDisplayValue(displayValue, inputPrecision);
+                input.step = step;
+                input.placeholder = placeholder;
             }
         });
+    }
+}
+
+function refreshJointControlDisplay() {
+    const container = document.getElementById('joint-controls');
+    if (!container) {
+        return;
+    }
+    
+    const config = getActiveJointConfig();
+    
+    if (dualArmMode && config) {
+        const totalJoints =
+            (config.robot1?.joint_chain?.joints?.length || jointAngles1.length) +
+            (config.robot2?.joint_chain?.joints?.length || jointAngles2.length);
+        createJointControls(totalJoints, config);
+    } else {
+        const numJoints =
+            jointAngles.length ||
+            config?.joint_chain?.joints?.length ||
+            (currentRobot?.getDimConfigurationSpace?.() ?? 0);
+        
+        if (numJoints > 0) {
+            createJointControls(numJoints, config);
+        } else {
+            container.innerHTML = '';
+        }
     }
 }
 
@@ -699,6 +902,13 @@ async function initVisualizer() {
     const canvas = document.getElementById('robot-canvas');
     visualizer = new RobotVisualizer(canvas);
     await visualizer.init();
+    
+    // 根据UI初始化点动乘法顺序
+    const teachOrderToggle = document.getElementById('teach-multiply-order-toggle');
+    if (teachOrderToggle && visualizer?.setTeachMultiplicationOrder) {
+        const initialOrder = teachOrderToggle.checked ? 'delta-first' : 'current-first';
+        visualizer.setTeachMultiplicationOrder(initialOrder);
+    }
 }
 
 /**
@@ -783,6 +993,9 @@ function updateSingleArmPose() {
             }
             visualizer.updateRobotPose(jointAngles, pose, orderedNames);
         }
+
+        // 同步关节滑块和输入框显示
+        updateJointSlidersFromAngles();
     } catch (error) {
         console.error('更新单臂位姿失败:', error);
     }
@@ -858,6 +1071,9 @@ function updateDualArmPose() {
         
         // 更新 UI 显示
         updateDualArmPoseDisplay(pose1, pose2);
+
+        // 同步双臂关节滑块和输入框显示
+        updateDualArmJointSlidersFromAngles();
         
     } catch (error) {
         console.error('更新双臂位姿失败:', error);
@@ -1732,6 +1948,84 @@ function setupEventListeners() {
         });
     }
     
+    const angleUnitToggle = document.getElementById('angle-unit-toggle');
+    if (angleUnitToggle) {
+        const updateAngleUnitToggleLabel = () => {
+            angleUnitToggle.textContent = angleDisplayMode === 'deg' ? '切换为弧度' : '切换为角度';
+        };
+        updateAngleUnitToggleLabel();
+        angleUnitToggle.addEventListener('click', () => {
+            angleDisplayMode = angleDisplayMode === 'deg' ? 'rad' : 'deg';
+            refreshJointControlDisplay();
+            updateAngleUnitToggleLabel();
+        });
+    }
+
+    const copyAnglesBtn = document.getElementById('copy-joint-angles-btn');
+    if (copyAnglesBtn) {
+        const defaultCopyText = copyAnglesBtn.textContent.trim();
+        copyAnglesBtn.addEventListener('click', async () => {
+            copyAnglesBtn.disabled = true;
+            try {
+                await copyJointAnglesToClipboard();
+                copyAnglesBtn.textContent = '已复制！';
+            } catch (error) {
+                console.error('复制关节角度失败:', error);
+                copyAnglesBtn.textContent = '复制失败';
+            } finally {
+                setTimeout(() => {
+                    copyAnglesBtn.textContent = defaultCopyText;
+                    copyAnglesBtn.disabled = false;
+                }, 1500);
+            }
+        });
+    }
+
+    const copyLimitsBtn = document.getElementById('copy-joint-limits-btn');
+    if (copyLimitsBtn) {
+        const defaultText = copyLimitsBtn.textContent.trim();
+        copyLimitsBtn.addEventListener('click', async () => {
+            copyLimitsBtn.disabled = true;
+            try {
+                await copyJointLimitsToClipboard();
+                copyLimitsBtn.textContent = '已复制！';
+            } catch (error) {
+                console.error('复制关节限位失败:', error);
+                copyLimitsBtn.textContent = '复制失败';
+            } finally {
+                setTimeout(() => {
+                    copyLimitsBtn.textContent = defaultText;
+                    copyLimitsBtn.disabled = false;
+                }, 1500);
+            }
+        });
+    }
+    
+    // 点动乘法顺序切换
+    const teachOrderToggle = document.getElementById('teach-multiply-order-toggle');
+    const teachOrderStatus = document.getElementById('teach-multiply-order-status');
+    const updateTeachOrderStatus = (isDeltaFirst) => {
+        if (!teachOrderStatus) return;
+        teachOrderStatus.textContent = isDeltaFirst 
+            ? '当前模式：局部坐标（Δ × 当前）'
+            : '当前模式：世界坐标（当前 × Δ）';
+    };
+    const applyTeachOrder = (isDeltaFirst) => {
+        if (visualizer?.setTeachMultiplicationOrder) {
+            const order = isDeltaFirst ? 'delta-first' : 'current-first';
+            visualizer.setTeachMultiplicationOrder(order);
+        }
+    };
+    if (teachOrderToggle) {
+        updateTeachOrderStatus(teachOrderToggle.checked);
+        applyTeachOrder(teachOrderToggle.checked);
+        teachOrderToggle.addEventListener('change', (e) => {
+            const isDeltaFirst = e.target.checked;
+            updateTeachOrderStatus(isDeltaFirst);
+            applyTeachOrder(isDeltaFirst);
+        });
+    }
+    
     // 示教器控制按钮（移除拖动末端执行器模式）
     const teachButtons = document.querySelectorAll('.teach-btn');
     teachButtons.forEach(button => {
@@ -2491,15 +2785,11 @@ async function applyPreset(preset) {
         jointAngles = clampJointAngles(jointAngles, jointNames, urdfRobot, config);
     }
     
-    // 更新滑块
-    jointAngles.forEach((angle, i) => {
-        const angleDeg = angle * 180 / Math.PI;
-        const slider = document.getElementById(`joint-${i}`);
-        if (slider) {
-            slider.value = angleDeg;
-            document.getElementById(`joint-value-${i}`).textContent = `${angleDeg.toFixed(2)}°`;
-        }
-    });
+    if (dualArmMode) {
+        updateDualArmJointSlidersFromAngles();
+    } else {
+        updateJointSlidersFromAngles();
+    }
     
     updateRobotPose();
 }

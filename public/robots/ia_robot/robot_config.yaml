@@ -35,7 +35,7 @@ robot1:
     auto_extract: true
 
 
-  initial_joint_angles: [0, 0, 0, 0, 0, 0, 0]
+  initial_joint_angles: [0.5235602094240838, 0, 0, 1.047120418848168, 0, 0, 0]
 
 # 机器人2配置（左臂）
 robot2:
@@ -62,7 +62,7 @@ robot2:
     auto_extract: true
 
   
-  initial_joint_angles: [0, 0, 0, 0, 0, 0, 0]
+  initial_joint_angles: [-0.5235602094240838, 0, 0, -1.047120418848168, 0, 0, 0]
 
 # 双臂系统配置
 dual_arm_config:
@@ -90,8 +90,8 @@ visualization:
 # 预设位姿
 presets:
   home:
-    robot1: [0, 0, 0, 0, 0, 0, 0]
-    robot2: [0, 0, 0, 0, 0, 0, 0]
+    robot1: [0.5235602094240838, 0, 0, 1.047120418848168, 0, 0, 0]
+    robot2: [-0.5235602094240838, 0, 0, -1.047120418848168, 0, 0, 0]
   cooperative:
     robot1: [0, -1.2, 1.8, -2.2, -1.57, 0, 0]
     robot2: [0, -1.2, 1.8, -2.2, -1.57, 0, 0]
