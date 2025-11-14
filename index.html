@@ -24,6 +24,9 @@
                 <div class="panel-section">
                     <h2>关节控制</h2>
                     <div class="joint-controls-toolbar" style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <button id="import-joint-angles-btn" class="demo-btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem;">
+                            从剪贴板导入
+                        </button>
                         <button id="copy-joint-angles-btn" class="demo-btn" style="padding: 0.35rem 0.75rem; font-size: 0.85rem;">
                             复制关节角度
                         </button>
@@ -78,11 +81,15 @@
                     <div style="margin-top: 1rem;">
                         <h3 style="margin-bottom: 0.5rem; font-size: 0.9rem; color: #cbd5e1;">末端执行器控制</h3>
                         <div id="dual-arm-control-mode" style="margin-bottom: 0.75rem; display: none;">
-                            <label class="toggle-switch" style="font-size: 0.85rem;">
-                                <input type="checkbox" id="dual-arm-relative-mode-toggle">
-                                <span class="toggle-slider"></span>
-                                <span class="toggle-label">相对位姿模式</span>
-                            </label>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label style="font-size: 0.85rem; color: #cbd5e1; display: block; margin-bottom: 0.25rem;">控制模式：</label>
+                                <select id="dual-arm-control-mode-select" style="width: 100%; padding: 0.4rem; font-size: 0.85rem; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 4px;">
+                                    <option value="absolute">绝对位姿</option>
+                                    <option value="relative">相对位姿</option>
+                                    <option value="robot1">机器人1</option>
+                                    <option value="robot2">机器人2</option>
+                                </select>
+                            </div>
                             <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem;">
                                 <span id="dual-arm-mode-label">绝对位姿模式：控制绝对位姿，保持相对位姿不变</span>
                             </div>
@@ -330,6 +337,30 @@
         </div>
     </div>
 
+    <!-- 右上角环境管理面板（默认隐藏） -->
+    <div class="floating-panel environment-panel hidden" id="environment-panel">
+        <div class="panel-header">
+            <h2>环境管理</h2>
+            <button class="panel-toggle" id="environment-toggle">+</button>
+        </div>
+        <div class="panel-body">
+            <div class="panel-section">
+                <h2>环境物体</h2>
+                <p class="panel-subtitle env-panel-description">
+                    管理场景中的附加物体，可添加箱子并附着到末端小球或双臂绝对姿态小球。
+                </p>
+                <div class="env-actions">
+                    <button id="add-environment-box-btn" class="demo-btn env-action-btn">
+                        添加箱子（41.5 × 30.5 × 14 cm）
+                    </button>
+                </div>
+                <div id="environment-object-list" class="environment-object-list">
+                    <div class="env-empty-message">当前场景没有环境物体</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 底部功能栏 -->
     <div id="bottom-dock" class="bottom-dock">
         <button class="dock-item" data-panel="control-panel">
@@ -339,6 +370,10 @@
         <button class="dock-item" data-panel="info-panel">
             <span class="dock-icon">📊</span>
             <span class="dock-label">信息面板</span>
+        </button>
+        <button class="dock-item" data-panel="environment-panel">
+            <span class="dock-icon">🌿</span>
+            <span class="dock-label">环境管理</span>
         </button>
     </div>
 

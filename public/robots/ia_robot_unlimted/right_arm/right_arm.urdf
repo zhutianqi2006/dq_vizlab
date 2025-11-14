@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="right_arm">
+  <link name="base_link">
+  </link>
+  <link name="rlink1">
+    <inertial>
+      <origin xyz="-2.08280310354247E-06 0.00161949059941522 0.0627032006634779" rpy="0 0 0" />
+      <mass value="3.28000" />
+      <inertia ixx="0.00188157196552088" ixy="-2.40135238962875E-08" ixz="-5.75831914604761E-08" iyy="0.00231576080757162" iyz="-0.00010018155567541" izz="0.00157852292049741" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint1" type="revolute">
+    <origin xyz="0 -0.159 0.24" rpy="1.57079632679489 1.5707963267949 0" />
+    <parent link="base_link" />
+    <child link="rlink1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="300" velocity="1" />
+  </joint>
+  <link name="rlink2">
+    <inertial>
+      <origin xyz="-2.4763208496148E-05 -0.0643600565059896 5.32515726273976E-06" rpy="0 0 0" />
+      <mass value="2.69000" />
+      <inertia ixx="0.0152922453131272" ixy="-3.70768021163177E-06" ixz="3.83973821996791E-08" iyy="0.00699323097176175" iyz="-0.00291573896285968" izz="0.0160952128008031" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint2" type="revolute">
+    <origin xyz="0 0 0.0850000000000001" rpy="-3.14159265358975 1.48352986419518 -1.57079632679486" />
+    <parent link="rlink1" />
+    <child link="rlink2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="0.1" effort="200" velocity="1" />
+  </joint>
+  <link name="rlink3">
+    <inertial>
+      <origin xyz="-0.000247912578623406 -0.00283725409224228 0.0971926215675121" rpy="0 0 0" />
+      <mass value="2.59629388364196" />
+      <inertia ixx="0.00896060320154467" ixy="5.09932382001823E-05" ixz="-1.38447535734707E-05" iyy="0.00953944543862587" iyz="-0.000158495893629265" izz="0.00464373379449821" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint3" type="revolute">
+    <origin xyz="0 -0.224999999999999 0" rpy="-1.57079632679498 -1.48352986419518 -3.14159265358971" />
+    <parent link="rlink2" />
+    <child link="rlink3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="200" velocity="1" />
+  </joint>
+  <link name="rlink4">
+    <inertial>
+      <origin xyz="-0.0800785511634325 5.13879548798973E-06 -0.013492208405962" rpy="0 0 0" />
+      <mass value="1.800" />
+      <inertia ixx="0.00317428178212875" ixy="-2.3223910910558E-07" ixz="-0.00158267658114894" iyy="0.00775114084358154" iyz="-1.6718177668853E-07" izz="0.00820069758730051" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink4.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint4" type="revolute">
+    <origin xyz="0.00359517438834202 0.0410930312962845 0.145" rpy="-1.4707963267949 1.5707963267949 0" />
+    <parent link="rlink3" />
+    <child link="rlink4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.2" upper="2.2" effort="200" velocity="1" />
+  </joint>
+  <link name="rlink5">
+    <inertial>
+      <origin xyz="0.00266045029177781 -0.000234540555031588 0.0439583915881141" rpy="0 0 0" />
+      <mass value="1.50318201927913" />
+      <inertia ixx="0.00217663469287259" ixy="-2.35312922226708E-05" ixz="-6.20645977511597E-05" iyy="0.00190983975291487" iyz="5.36427463732566E-06" izz="0.00156524567800616" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink5.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint5" type="revolute">
+    <origin xyz="-0.186499999999999 0 -0.0412499999999999" rpy="1.5707963267949 0.000 -1.5707963267949" />
+    <parent link="rlink4" />
+    <child link="rlink5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="1" />
+  </joint>
+  <link name="rlink6">
+    <inertial>
+      <origin xyz="0.00216965532390774 0.0694646027094146 0.0215302951828984" rpy="0 0 0" />
+      <mass value="1.6410575801377" />
+      <inertia ixx="0.00404335825498938" ixy="-9.87105376458413E-05" ixz="6.26738467485885E-05" iyy="0.00197198282862732" iyz="0.000723539882508139" izz="0.00371776982636216" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink6.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint6" type="revolute">
+    <origin xyz="0 0 0.0594999999999999" rpy="1.5707963267949 0 1.48352986419518" />
+    <parent link="rlink5" />
+    <child link="rlink6" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.4" upper="1.4" effort="100" velocity="1" />
+  </joint>
+  <link name="rlink7">
+    <inertial>
+      <origin xyz="0.0358578517961456 9.61380048902782E-08 0.0265888368273027" rpy="0 0 0" />
+      <mass value="0.16" />
+      <inertia ixx="0.000516426130136875" ixy="3.02840105537652E-09" ixz="0.000293961357992134" iyy="0.00091674778940183" iyz="-3.65792094178381E-09" izz="0.000855256582554781" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink7.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.776470588235294 0.756862745098039 0.737254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://ia_robot_unlimted/meshes/rlink7.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rjoint7" type="revolute">
+    <origin xyz="0 0.0950000000000004 0" rpy="1.5707963267949 0 1.5707963267949" />
+    <parent link="rlink6" />
+    <child link="rlink7" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.65" upper="0.65" effort="100" velocity="1" />
+  </joint>
+
+  <joint name="rjoint8" type="fixed">
+    <origin xyz="0.0765000000000002 0 0.000368852459016442" rpy="-1.5007963267949 0 0" />
+    <parent link="rlink7" />
+    <child link="ee_link" />
+  </joint>
+  <link name="ee_link">
+    <inertial>
+      <origin xyz="0.260863782297582 0.241513971664168 0.0344885319982632" rpy="-1.5007963267949 0 0" />
+      <mass value="0.0001" />
+      <inertia ixx="1.77525561757236E-09" ixy="1.77525561757236E-09" ixz="1.77525561757236E-09" iyy="1.77525561757236E-09" iyz="1.77525561757236E-09" izz="1.77525561757236E-09" />
+    </inertial>
+  </link>
+</robot>
+

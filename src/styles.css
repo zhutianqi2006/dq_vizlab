@@ -172,6 +172,12 @@ body {
     max-height: 500px;
 }
 
+.environment-panel {
+    top: 20px;
+    right: 20px;
+    width: 320px;
+}
+
 /* 面板区块 */
 .panel-section {
     margin-bottom: 1.5rem;
@@ -186,6 +192,137 @@ body {
     margin-bottom: 0.75rem;
     color: #ffffff;
     font-weight: 600;
+}
+
+.panel-subtitle {
+    font-size: 0.85rem;
+    color: #cbd5f5;
+    line-height: 1.4;
+    margin-bottom: 0.75rem;
+}
+
+.env-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.env-action-btn {
+    font-size: 0.85rem;
+    padding: 0.35rem 0.75rem;
+}
+
+.environment-object-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.env-empty-message {
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px dashed rgba(148, 163, 184, 0.45);
+    color: #94a3b8;
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.env-object-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem;
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.env-object-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.env-object-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #e0f2fe;
+}
+
+.env-object-meta {
+    font-size: 0.8rem;
+    color: #cbd5e1;
+}
+
+.env-object-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+
+.env-attach-select {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8rem;
+    min-width: 150px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.env-attach-select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.env-attach-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.env-remove-btn {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.env-remove-btn:disabled,
+.env-adjust-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.env-remove-btn:hover {
+    background: rgba(239, 68, 68, 0.28);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.env-adjust-btn {
+    background: rgba(59, 130, 246, 0.18);
+    color: #bfdbfe;
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.env-adjust-btn:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.28);
+    border-color: rgba(59, 130, 246, 0.5);
 }
 
 /* 机器人选择器 */

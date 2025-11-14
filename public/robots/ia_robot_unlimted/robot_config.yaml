@@ -1,0 +1,101 @@
+# 双臂机器人配置：IA Robot Right + Left Arm（拆分为两个独立的URDF文件）
+# 协作双臂系统配置
+
+dual_arm: true
+dual_arm_type: "two_urdf"  # 两个独立的URDF文件（与"single_urdf"格式不同）
+
+robot_name: "IA Robot Right + Left Arm Dual System"
+description: "双臂协作机器人系统，包含右臂和左臂（两个独立的URDF文件）"
+
+# 机器人1配置（右臂）
+robot1:
+  name: "Right Arm"
+  urdf_file: "right_arm/right_arm.urdf"
+  urdf_path: "right_arm"
+  
+  joint_chain:
+    base_link: "base_link"
+    end_link: "ee_link"
+    joints:
+      - "rjoint1"
+      - "rjoint2"
+      - "rjoint3"
+      - "rjoint4"
+      - "rjoint5"
+      - "rjoint6"
+      - "rjoint7"
+
+  # 机器人1的基座位姿（相对于世界坐标系原点，Z-up）
+  effector_offset: [0.0765000000000002, 0, 0.000368852459016442]
+  # 格式：[tx, ty, tz] 或 [qw, qx, qy, qz, tx, ty, tz]
+# 平移：Y=0.5m（右边）
+  # MDH参数（自动提取）
+  mdh_extraction:
+    enabled: true
+    auto_extract: true
+
+
+  initial_joint_angles: [0.5235602094240838, 0, 0, 1.047120418848168, 0, 0, 0]
+
+# 机器人2配置（左臂）
+robot2:
+  name: "Left Arm"
+  urdf_file: "left_arm/left_arm.urdf"
+  urdf_path: "left_arm"
+  
+  joint_chain:
+    base_link: "base_link"
+    end_link: "ee_link"
+    joints:
+      - "ljoint1"
+      - "ljoint2"
+      - "ljoint3"
+      - "ljoint4"
+      - "ljoint5"
+      - "ljoint6"
+      - "ljoint7"
+  
+  effector_offset: [0.0765,  0,  -0.041131]
+  # MDH参数（自动提取）
+  mdh_extraction:
+    enabled: true
+    auto_extract: true
+
+  
+  initial_joint_angles: [-0.5235602094240838, 0, 0, -1.047120418848168, 0, 0, 0]
+
+# 双臂系统配置
+dual_arm_config:
+  # 绝对位姿（两个末端执行器的平均位置）
+  # 计算方式：absolute_pose = (pose1 + pose2) / 2
+  # 这里的配置只是说明，实际由WASM计算
+  
+  # 相对位姿（robot1末端到robot2末端的相对变换）
+  # 计算方式：relative_pose = pose2 * pose1^(-1)
+  # 这里的配置只是说明，实际由WASM计算
+  
+  # 相对位姿增益（用于控制）
+  relative_gain: 0.5
+
+# 可视化配置
+visualization:
+  robot1_color: "#3b82f6"      # 蓝色 - 右臂
+  robot2_color: "#10b981"      # 绿色 - 左臂
+  absolute_pose_color: "#fbbf24"  # 黄色 - 绝对位姿标记
+  relative_pose_color: "#ef4444"  # 红色 - 相对位姿连线
+  show_absolute_pose: true
+  show_relative_pose: true
+  end_effector_size: 0.02
+
+# 预设位姿
+presets:
+  home:
+    robot1: [0.5235602094240838, 0, 0, 1.047120418848168, 0, 0, 0]
+    robot2: [-0.5235602094240838, 0, 0, -1.047120418848168, 0, 0, 0]
+  cooperative:
+    robot1: [0, -1.2, 1.8, -2.2, -1.57, 0, 0]
+    robot2: [0, -1.2, 1.8, -2.2, -1.57, 0, 0]
+  opposite:
+    robot1: [1.57, 0, 0, 0, 0, 0, 0]
+    robot2: [-1.57, 0, 0, 0, 0, 0, 0]
+

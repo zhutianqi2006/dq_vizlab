@@ -58,6 +58,16 @@ export class RobotVisualizer {
         
         // MoveIt 风格的拖动箭头
         this.endEffectorGizmo = null;  // 拖动控制组（包含平移和旋转箭头）
+
+        // 环境物体管理
+        this.environmentGroup = null;
+        this.environmentObjects = new Map();
+
+        // 预分配临时向量，减少频繁创建
+        this._tempVec3 = new THREE.Vector3();
+        this._tempQuat = new THREE.Quaternion();
+        this._tempScale = new THREE.Vector3();
+        this._tempEuler = new THREE.Euler();
         this.translationArrows = { 
             x: { positive: null, negative: null }, 
             y: { positive: null, negative: null }, 
@@ -79,6 +89,12 @@ export class RobotVisualizer {
         // 创建场景
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x2d2d3e); // 调亮背景色（从 0x1a1a2e 改为 0x2d2d3e）
+        
+        // 环境物体组
+        this.environmentGroup = new THREE.Group();
+        this.environmentGroup.name = 'EnvironmentObjects';
+        this.scene.add(this.environmentGroup);
+        this.environmentObjects.clear();
         
         // 确保canvas尺寸已正确设置
         if (this.canvas.clientWidth === 0 || this.canvas.clientHeight === 0) {
@@ -202,14 +218,59 @@ export class RobotVisualizer {
      * @param {*} dqCurrent - 当前双四元数
      * @returns {*} 组合后的双四元数
      */
-    combineDQWithTeachOrder(dqDelta, dqCurrent) {
+    combineDQWithTeachOrder(dqDelta, dqCurrent, deltaOnLeft = true) {
         if (!window.DQModule || !window.DQModule.DQWrapper) {
             throw new Error('DQ Robotics 模块未加载');
         }
-        if (this.teachMultiplicationOrder === 'current-first') {
-            return window.DQModule.DQWrapper.multiply(dqCurrent, dqDelta);
+        const { multiply } = window.DQModule.DQWrapper;
+        const isCurrentFirst = this.teachMultiplicationOrder === 'current-first';
+        
+        if (deltaOnLeft) {
+            // 默认：Δ × 当前；切换时交换顺序
+            return isCurrentFirst ? multiply(dqCurrent, dqDelta) : multiply(dqDelta, dqCurrent);
         }
-        return window.DQModule.DQWrapper.multiply(dqDelta, dqCurrent);
+        // 默认：当前 × Δ；切换时交换顺序
+        return isCurrentFirst ? multiply(dqDelta, dqCurrent) : multiply(dqCurrent, dqDelta);
+    }
+    
+    /**
+     * 判断当前是否为世界坐标平移模式
+     * @returns {boolean}
+     */
+    isWorldTranslationMode() {
+        return this.teachMultiplicationOrder === 'current-first';
+    }
+
+    /**
+     * 根据轴名称返回单位基向量
+     * @param {string} axis - 'x' | 'y' | 'z'
+     * @returns {THREE.Vector3}
+     */
+    getAxisBasisVector(axis) {
+        switch (axis) {
+            case 'x':
+                return new THREE.Vector3(1, 0, 0);
+            case 'y':
+                return new THREE.Vector3(0, 1, 0);
+            case 'z':
+                return new THREE.Vector3(0, 0, 1);
+            default:
+                throw new Error(`无效的轴名称: ${axis}`);
+        }
+    }
+
+    /**
+     * 获取平移方向（世界坐标系向量），根据当前模式决定是否使用末端旋转
+     * @param {string} axis - 'x' | 'y' | 'z'
+     * @param {THREE.Quaternion|null} referenceQuaternion - 末端或参考坐标系四元数
+     * @returns {THREE.Vector3}
+     */
+    getTranslationDirection(axis, referenceQuaternion = null) {
+        const axisVec = this.getAxisBasisVector(axis);
+        if (!this.isWorldTranslationMode() && referenceQuaternion) {
+            axisVec.applyQuaternion(referenceQuaternion);
+        }
+        return axisVec;
     }
     
     /**
@@ -616,6 +677,9 @@ export class RobotVisualizer {
      * @param {Object} config - 配置对象，包含基座位姿等
      */
     async loadSingleArmURDF(robot, config = null) {
+        // 确保先解除环境物体的附着，以免随旧锚点一起被移除
+        this.detachAllEnvironmentObjects();
+
         // 移除旧的机器人模型
         if (this.urdfRobot) {
             this.scene.remove(this.urdfRobot);
@@ -737,6 +801,9 @@ export class RobotVisualizer {
      * @param {string} dualArmType - 双臂格式类型：'two_urdf' 或 'single_urdf'
      */
     async loadDualArmURDF(robot1, robot2, config, dualArmType = 'two_urdf') {
+        // 先解除环境物体附着，避免随着旧锚点被移除
+        this.detachAllEnvironmentObjects();
+
         // 移除旧的机器人模型
         if (this.urdfRobot) {
             this.scene.remove(this.urdfRobot);
@@ -2086,49 +2153,10 @@ export class RobotVisualizer {
         }
         
         try {
-            // 计算移动步长（单位：米）
-            const stepSize = 0.01; // 1cm per step
-            
-            // 合并关节角度：[robot1_joints..., robot2_joints...]
-            const allJointAngles = [...window.jointAngles1, ...window.jointAngles2];
-            
-            // 获取当前绝对位姿
-            const dqAbsoluteCurrentArray = window.dualArmSystem.getAbsolutePose(allJointAngles);
-            if (!dqAbsoluteCurrentArray || dqAbsoluteCurrentArray.length !== 8) {
-                console.error('无法获取当前绝对位姿');
-                return;
-            }
-            
-            const dqAbsoluteCurrent = window.DQModule.DQWrapper.createFromArray(dqAbsoluteCurrentArray);
-            
-            // 从双四元数中提取旋转四元数（用于确定绝对位姿坐标系）
-            const rotationArray = window.DQModule.DQWrapper.getRotation(dqAbsoluteCurrent);
-            const qw = rotationArray[0] || 1;
-            const qx = rotationArray[1] || 0;
-            const qy = rotationArray[2] || 0;
-            const qz = rotationArray[3] || 0;
-            
-            // 创建 THREE.js 四元数
-            const absolutePoseQuaternion = new THREE.Quaternion(qx, qy, qz, qw);
-            
-            // 局部轴方向（在绝对位姿坐标系中）
-            const localAxisDir = new THREE.Vector3();
-            if (axis === 'x') localAxisDir.set(1, 0, 0);
-            else if (axis === 'y') localAxisDir.set(0, 1, 0);
-            else if (axis === 'z') localAxisDir.set(0, 0, 1);
-            else {
-                console.error('无效的轴名称:', axis);
-                return;
-            }
-            
-            // 转换到世界坐标系
-            const worldAxisDir = localAxisDir.clone().applyQuaternion(absolutePoseQuaternion);
-            
-            // 根据方向确定移动方向
+            const stepSize = 0.005;
             const directionSign = direction === 'positive' ? 1 : -1;
-            const delta = worldAxisDir.multiplyScalar(stepSize * directionSign);
-            
-            // 使用零空间方法更新关节角度（保持相对位姿不变）
+            const delta = this.getTranslationDirection(axis).multiplyScalar(stepSize * directionSign);
+            const allJointAngles = [...window.jointAngles1, ...window.jointAngles2];
             this.updateDualArmJointsFromAbsolutePoseDelta(delta, allJointAngles);
         } catch (error) {
             console.error('移动双臂绝对位姿失败:', error);
@@ -2188,8 +2216,8 @@ export class RobotVisualizer {
                 return;
             }
             
-            // 计算目标绝对位姿：dq_target = rotation * dq_current
-            const dqAbsoluteTarget = window.DQModule.DQWrapper.multiply(dqAbsoluteCurrent, rotationDQ);
+            // 计算目标绝对位姿，根据乘法顺序切换
+            const dqAbsoluteTarget = this.combineDQWithTeachOrder(rotationDQ, dqAbsoluteCurrent, false);
             const dqAbsoluteTargetArray = window.DQModule.DQWrapper.toArray(dqAbsoluteTarget);
             
             // 使用零空间方法更新关节角度（保持相对位姿不变）
@@ -2218,11 +2246,26 @@ export class RobotVisualizer {
             const dqRelativeCurrentArray = window.dualArmSystem.getRelativePose(currentJointAngles);
             
             // 创建位移的平移双四元数
-            const dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
             const dqAbsoluteCurrent = window.DQModule.DQWrapper.createFromArray(dqAbsoluteCurrentArray);
-            
-            // 计算目标绝对位姿
-            const dqAbsoluteTarget = this.combineDQWithTeachOrder(dqDelta, dqAbsoluteCurrent);
+            const { multiply } = window.DQModule.DQWrapper;
+            const worldMode = this.isWorldTranslationMode();
+            let dqDelta;
+            let dqAbsoluteTarget;
+            if (worldMode) {
+                dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
+                dqAbsoluteTarget = multiply(dqDelta, dqAbsoluteCurrent);
+            } else {
+                const rotationArray = window.DQModule.DQWrapper.getRotation(dqAbsoluteCurrent);
+                const rotationQuat = new THREE.Quaternion(
+                    rotationArray[1] || 0,
+                    rotationArray[2] || 0,
+                    rotationArray[3] || 0,
+                    rotationArray[0] || 1
+                );
+                const deltaLocal = delta.clone().applyQuaternion(rotationQuat.clone().conjugate());
+                dqDelta = window.DQModule.DQWrapper.translation(deltaLocal.x, deltaLocal.y, deltaLocal.z);
+                dqAbsoluteTarget = multiply(dqAbsoluteCurrent, dqDelta);
+            }
             const dqAbsoluteTargetArray = window.DQModule.DQWrapper.toArray(dqAbsoluteTarget);
             
             // 使用迭代求解
@@ -2366,131 +2409,6 @@ export class RobotVisualizer {
     }
     
 
-    updateDualArmJointsFromAbsolutePoseTarget2(dqAbsoluteTargetArray, currentJointAngles, dqRelativeCurrentArray = null) {
-        if (!window.dualArmSystem || !currentJointAngles || currentJointAngles.length === 0) return;
-        
-        try {
-            // 获取当前相对位姿（如果未提供）
-            if (!dqRelativeCurrentArray) {
-                dqRelativeCurrentArray = window.dualArmSystem.getRelativePose(currentJointAngles);
-            }
-            
-            // 迭代求解参数
-            const epsilon = 0.0000001;
-            const maxIterations = 50;
-            const damping = 0.5;
-            
-            let q = [...currentJointAngles];
-            let errNorm = epsilon + 1;
-            let iteration = 0;
-            
-            while (errNorm > epsilon && iteration < maxIterations) {
-                // 获取当前绝对位姿和相对位姿
-                const dqAbsoluteCurrentIterArray = window.dualArmSystem.getAbsolutePose(q);
-                const dqRelativeCurrentIterArray = window.dualArmSystem.getRelativePose(q);
-                
-                // 计算误差向量
-                // 绝对位姿误差（8元素）
-                const errAbsolute = [];
-                for (let i = 0; i < 8; i++) {
-                    errAbsolute.push(dqAbsoluteTargetArray[i] - dqAbsoluteCurrentIterArray[i]);
-                }
-                
-                // 相对位姿误差（保持为0，即保持相对位姿不变）
-                const errRelative = [];
-                for (let i = 0; i < 8; i++) {
-                    errRelative.push(dqRelativeCurrentArray[i] - dqRelativeCurrentIterArray[i]);
-                }
-                
-                // 组合误差向量：[err_abs; err_rel]（16元素）
-                const err = [...errAbsolute, ...errRelative];
-                
-                // 计算误差范数
-                errNorm = Math.sqrt(err.reduce((sum, e) => sum + e * e, 0));
-                
-                if (errNorm <= epsilon) {
-                    break;
-                }
-                
-                // 获取雅可比矩阵
-                // 绝对位姿雅可比（8xN）
-                const jacobianAbsolute = window.dualArmSystem.getAbsolutePoseJacobian(q);
-                // 相对位姿雅可比（8xN）
-                const jacobianRelative = window.dualArmSystem.getRelativePoseJacobian(q);
-                
-                // 组合雅可比矩阵：[J_abs; J_rel]（16xN）
-                const jacobian = [];
-                for (let i = 0; i < jacobianAbsolute.length; i++) {
-                    jacobian.push([...jacobianAbsolute[i]]);
-                }
-                for (let i = 0; i < jacobianRelative.length; i++) {
-                    jacobian.push([...jacobianRelative[i]]);
-                }
-                
-                // 计算雅可比伪逆
-                const jacobianPseudoInv = this.pseudoInverse(jacobian);
-                
-                // 计算关节角度增量：dq = pinv(J) * damping * err
-                const deltaJoints = [];
-                for (let i = 0; i < jacobianPseudoInv.length; i++) {
-                    let sum = 0;
-                    for (let j = 0; j < err.length; j++) {
-                        sum += jacobianPseudoInv[i][j] * err[j] * damping;
-                    }
-                    deltaJoints.push(sum);
-                }
-                
-                // 更新关节角度
-                for (let i = 0; i < q.length && i < deltaJoints.length; i++) {
-                    q[i] += deltaJoints[i];
-                }
-                
-                iteration++;
-            }
-            
-            // 分离关节角度
-            const robot1JointCount = window.jointAngles1.length;
-            const robot2JointCount = window.jointAngles2.length;
-            
-            // 限制关节角度
-            if (window.customRobotConfig) {
-                const jointNames1 = window.customRobotConfig?.robot1?.joint_chain?.joints || [];
-                const jointNames2 = window.customRobotConfig?.robot2?.joint_chain?.joints || [];
-                
-                const q1 = q.slice(0, robot1JointCount);
-                const q2 = q.slice(robot1JointCount, robot1JointCount + robot2JointCount);
-                
-                if (window.clampJointAngles) {
-                    const clampedQ1 = window.clampJointAngles(q1, jointNames1, this.robot1URDF, window.customRobotConfig?.robot1);
-                    const clampedQ2 = window.clampJointAngles(q2, jointNames2, this.robot2URDF, window.customRobotConfig?.robot2);
-                    q = [...clampedQ1, ...clampedQ2];
-                }
-            }
-            
-            // 更新全局关节角度
-            const q1 = q.slice(0, robot1JointCount);
-            const q2 = q.slice(robot1JointCount, robot1JointCount + robot2JointCount);
-            
-            for (let i = 0; i < window.jointAngles1.length && i < q1.length; i++) {
-                window.jointAngles1[i] = q1[i];
-            }
-            for (let i = 0; i < window.jointAngles2.length && i < q2.length; i++) {
-                window.jointAngles2[i] = q2[i];
-            }
-            
-            // 同步到 main.js
-            if (window.updateGlobalVariables) {
-                window.updateGlobalVariables();
-            }
-            
-            // 更新机器人位姿
-            if (window.updateRobotPose) {
-                window.updateRobotPose();
-            }
-        } catch (error) {
-            console.error('更新双臂关节角度失败:', error);
-        }
-    }
     /**
      * 沿指定轴方向移动双臂相对位姿（示教器模式，使用零空间保持绝对位姿不变）
      * @param {string} axis - 轴名称：'x', 'y', 或 'z'
@@ -2519,49 +2437,10 @@ export class RobotVisualizer {
         }
         
         try {
-            // 计算移动步长（单位：米）
-            const stepSize = 0.01; // 1cm per step
-            
-            // 合并关节角度：[robot1_joints..., robot2_joints...]
-            const allJointAngles = [...window.jointAngles1, ...window.jointAngles2];
-            
-            // 获取当前相对位姿
-            const dqRelativeCurrentArray = window.dualArmSystem.getRelativePose(allJointAngles);
-            if (!dqRelativeCurrentArray || dqRelativeCurrentArray.length !== 8) {
-                console.error('无法获取当前相对位姿');
-                return;
-            }
-            
-            const dqRelativeCurrent = window.DQModule.DQWrapper.createFromArray(dqRelativeCurrentArray);
-            
-            // 从双四元数中提取旋转四元数（用于确定相对位姿坐标系）
-            const rotationArray = window.DQModule.DQWrapper.getRotation(dqRelativeCurrent);
-            const qw = rotationArray[0] || 1;
-            const qx = rotationArray[1] || 0;
-            const qy = rotationArray[2] || 0;
-            const qz = rotationArray[3] || 0;
-            
-            // 创建 THREE.js 四元数
-            const relativePoseQuaternion = new THREE.Quaternion(qx, qy, qz, qw);
-            
-            // 局部轴方向（在相对位姿坐标系中）
-            const localAxisDir = new THREE.Vector3();
-            if (axis === 'x') localAxisDir.set(1, 0, 0);
-            else if (axis === 'y') localAxisDir.set(0, 1, 0);
-            else if (axis === 'z') localAxisDir.set(0, 0, 1);
-            else {
-                console.error('无效的轴名称:', axis);
-                return;
-            }
-            
-            // 转换到世界坐标系
-            const worldAxisDir = localAxisDir.clone().applyQuaternion(relativePoseQuaternion);
-            
-            // 根据方向确定移动方向
+            const stepSize = 0.005;
             const directionSign = direction === 'positive' ? 1 : -1;
-            const delta = worldAxisDir.multiplyScalar(stepSize * directionSign);
-            
-            // 使用零空间方法更新关节角度（保持绝对位姿不变）
+            const delta = this.getTranslationDirection(axis).multiplyScalar(stepSize * directionSign);
+            const allJointAngles = [...window.jointAngles1, ...window.jointAngles2];
             this.updateDualArmJointsFromRelativePoseDelta(delta, allJointAngles);
         } catch (error) {
             console.error('移动双臂相对位姿失败:', error);
@@ -2621,8 +2500,8 @@ export class RobotVisualizer {
                 return;
             }
             
-            // 计算目标相对位姿：dq_target = rotation * dq_current
-            const dqRelativeTarget = window.DQModule.DQWrapper.multiply(rotationDQ, dqRelativeCurrent);
+            // 计算目标相对位姿，根据乘法顺序切换
+            const dqRelativeTarget = this.combineDQWithTeachOrder(rotationDQ, dqRelativeCurrent);
             const dqRelativeTargetArray = window.DQModule.DQWrapper.toArray(dqRelativeTarget);
             
             // 使用零空间方法更新关节角度（保持绝对位姿不变）
@@ -2647,11 +2526,26 @@ export class RobotVisualizer {
             const dqRelativeCurrentArray = window.dualArmSystem.getRelativePose(currentJointAngles);
             
             // 创建位移的平移双四元数
-            const dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
             const dqRelativeCurrent = window.DQModule.DQWrapper.createFromArray(dqRelativeCurrentArray);
-            
-            // 计算目标相对位姿
-            const dqRelativeTarget = this.combineDQWithTeachOrder(dqDelta, dqRelativeCurrent);
+            const { multiply } = window.DQModule.DQWrapper;
+            const worldMode = this.isWorldTranslationMode();
+            let dqDelta;
+            let dqRelativeTarget;
+            if (worldMode) {
+                dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
+                dqRelativeTarget = multiply(dqDelta, dqRelativeCurrent);
+            } else {
+                const rotationArray = window.DQModule.DQWrapper.getRotation(dqRelativeCurrent);
+                const rotationQuat = new THREE.Quaternion(
+                    rotationArray[1] || 0,
+                    rotationArray[2] || 0,
+                    rotationArray[3] || 0,
+                    rotationArray[0] || 1
+                );
+                const deltaLocal = delta.clone().applyQuaternion(rotationQuat.clone().conjugate());
+                dqDelta = window.DQModule.DQWrapper.translation(deltaLocal.x, deltaLocal.y, deltaLocal.z);
+                dqRelativeTarget = multiply(dqRelativeCurrent, dqDelta);
+            }
             const dqRelativeTargetArray = window.DQModule.DQWrapper.toArray(dqRelativeTarget);
             
             // 使用迭代求解
@@ -2678,7 +2572,7 @@ export class RobotVisualizer {
             }
             
             // 迭代求解参数
-            const epsilon = 0.001;
+            const epsilon = 0.000001;
             const maxIterations = 50;
             const damping = 0.5;
             
@@ -2816,47 +2710,18 @@ export class RobotVisualizer {
         }
         
         try {
-            // 计算移动步长（单位：米）
-            const stepSize = 0.01; // 1cm per step
-            
-            // 直接从 DQ Robotics 获取当前末端执行器位姿（而不是依赖视觉化的endEffector）
-            const dqCurrentArray = window.currentRobot.fkm(window.jointAngles);
-            if (!dqCurrentArray || dqCurrentArray.length !== 8) {
-                console.error('无法获取当前位姿');
-                return;
-            }
-            
-            const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
-            
-            // 从双四元数中提取旋转四元数（用于确定末端执行器坐标系）
-            const rotationArray = window.DQModule.DQWrapper.getRotation(dqCurrent);
-            // rotationArray格式：[w, x, y, z]
-            const qw = rotationArray[0] || 1;
-            const qx = rotationArray[1] || 0;
-            const qy = rotationArray[2] || 0;
-            const qz = rotationArray[3] || 0;
-            
-            // 创建 THREE.js 四元数（注意：THREE.js 四元数格式是 [x, y, z, w]）
-            const endEffectorQuaternion = new THREE.Quaternion(qx, qy, qz, qw);
-            
-            // 局部轴方向（在末端执行器坐标系中）
-            const localAxisDir = new THREE.Vector3();
-            if (axis === 'x') localAxisDir.set(1, 0, 0);
-            else if (axis === 'y') localAxisDir.set(0, 1, 0);
-            else if (axis === 'z') localAxisDir.set(0, 0, 1);
-            else {
-                console.error('无效的轴名称:', axis);
-                return;
-            }
-            
-            // 转换到世界坐标系
-            const worldAxisDir = localAxisDir.clone().applyQuaternion(endEffectorQuaternion);
-            
-            // 根据方向确定移动方向
+            const stepSize = 0.005;
             const directionSign = direction === 'positive' ? 1 : -1;
-            const delta = worldAxisDir.multiplyScalar(stepSize * directionSign);
-            
-            // 使用现有的逆运动学方法更新关节角度
+            const rotationArray = window.currentRobot?.getEndEffectorPose
+                ? window.currentRobot.getEndEffectorPose(window.jointAngles).rotation
+                : window.DQModule.DQWrapper.getRotation(window.DQModule.DQWrapper.createFromArray(window.currentRobot.fkm(window.jointAngles)));
+            const rotationQuat = new THREE.Quaternion(
+                rotationArray[1] || 0,
+                rotationArray[2] || 0,
+                rotationArray[3] || 0,
+                rotationArray[0] || 1
+            );
+            const delta = this.getTranslationDirection(axis, rotationQuat).multiplyScalar(stepSize * directionSign);
             this.updateJointsFromEndEffectorDelta(delta);
         } catch (error) {
             console.error('移动末端执行器失败:', error);
@@ -2916,8 +2781,7 @@ export class RobotVisualizer {
             
             // 计算目标位姿：dq_target = dq_rotation * dq_current
             // 参考 MATLAB: dqad = DQ([cos(pi/16);0;sin(pi/16);0]) .* dqad_ant;
-            // 注意：在DQ中，旋转应该在左侧：rotation * current（先旋转再应用当前位姿）
-            const dqTarget = window.DQModule.DQWrapper.multiply(dqCurrent,rotationDQ);
+            const dqTarget = this.combineDQWithTeachOrder(rotationDQ, dqCurrent, false);
             const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
             
             // 迭代求解逆运动学（参考 MATLAB 的 while 循环）
@@ -3013,6 +2877,368 @@ export class RobotVisualizer {
     }
     
     /**
+     * 沿指定轴方向移动机器人1末端执行器（双臂模式下的单臂控制）
+     * @param {string} axis - 轴名称：'x', 'y', 或 'z'
+     * @param {string} direction - 方向：'positive' 或 'negative'
+     */
+    moveRobot1EndEffectorAlongAxis(axis, direction) {
+        if (!this.dualArmMode || !window.robot1 || !window.jointAngles1 || window.jointAngles1.length === 0) {
+            console.warn('机器人1未初始化');
+            return;
+        }
+        
+        if (!window.DQModule || !window.DQModule.DQWrapper) {
+            console.error('DQ Robotics 模块未加载');
+            return;
+        }
+        
+        try {
+            const stepSize = 0.005;
+            const directionSign = direction === 'positive' ? 1 : -1;
+            const delta = this.getTranslationDirection(axis).multiplyScalar(stepSize * directionSign);
+            this.updateRobot1JointsFromEndEffectorDelta(delta);
+        } catch (error) {
+            console.error('移动机器人1末端执行器失败:', error);
+        }
+    }
+    
+    /**
+     * 绕指定轴旋转机器人1末端执行器（双臂模式下的单臂控制）
+     * @param {string} axis - 旋转轴名称：'rx', 'ry', 或 'rz'
+     * @param {string} direction - 方向：'positive' 或 'negative'
+     */
+    rotateRobot1EndEffectorAroundAxis(axis, direction) {
+        if (!this.dualArmMode || !window.robot1 || !window.jointAngles1 || window.jointAngles1.length === 0) {
+            console.warn('机器人1未初始化');
+            return;
+        }
+        
+        if (!window.DQModule || !window.DQModule.DQWrapper) {
+            console.error('DQ Robotics 模块未加载');
+            return;
+        }
+        
+        try {
+            const angle = Math.PI / 128;
+            const directionSign = direction === 'positive' ? 1 : -1;
+            const rotationAngle = angle * directionSign;
+            
+            const dqCurrentArray = window.robot1.fkm(window.jointAngles1);
+            const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
+            
+            let rotationDQ;
+            if (axis === 'rx') {
+                rotationDQ = window.DQModule.DQWrapper.rotation(rotationAngle, 1, 0, 0);
+            } else if (axis === 'ry') {
+                rotationDQ = window.DQModule.DQWrapper.rotation(rotationAngle, 0, 1, 0);
+            } else if (axis === 'rz') {
+                rotationDQ = window.DQModule.DQWrapper.rotation(rotationAngle, 0, 0, 1);
+            } else {
+                console.error('无效的旋转轴名称:', axis);
+                return;
+            }
+            
+            const dqTarget = this.combineDQWithTeachOrder(rotationDQ, dqCurrent, false);
+            const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
+            
+            this.updateRobot1JointsWithPseudoInverse(dqTargetArray);
+        } catch (error) {
+            console.error('旋转机器人1末端执行器失败:', error);
+        }
+    }
+    
+    /**
+     * 沿指定轴方向移动机器人2末端执行器（双臂模式下的单臂控制）
+     * @param {string} axis - 轴名称：'x', 'y', 或 'z'
+     * @param {string} direction - 方向：'positive' 或 'negative'
+     */
+    moveRobot2EndEffectorAlongAxis(axis, direction) {
+        if (!this.dualArmMode || !window.robot2 || !window.jointAngles2 || window.jointAngles2.length === 0) {
+            console.warn('机器人2未初始化');
+            return;
+        }
+        
+        if (!window.DQModule || !window.DQModule.DQWrapper) {
+            console.error('DQ Robotics 模块未加载');
+            return;
+        }
+        
+        try {
+            const stepSize = 0.005;
+            const directionSign = direction === 'positive' ? 1 : -1;
+            const delta = this.getTranslationDirection(axis).multiplyScalar(stepSize * directionSign);
+            this.updateRobot2JointsFromEndEffectorDelta(delta);
+        } catch (error) {
+            console.error('移动机器人2末端执行器失败:', error);
+        }
+    }
+    
+    /**
+     * 绕指定轴旋转机器人2末端执行器（双臂模式下的单臂控制）
+     * @param {string} axis - 旋转轴名称：'rx', 'ry', 或 'rz'
+     * @param {string} direction - 方向：'positive' 或 'negative'
+     */
+    rotateRobot2EndEffectorAroundAxis(axis, direction) {
+        if (!this.dualArmMode || !window.robot2 || !window.jointAngles2 || window.jointAngles2.length === 0) {
+            console.warn('机器人2未初始化');
+            return;
+        }
+        
+        if (!window.DQModule || !window.DQModule.DQWrapper) {
+            console.error('DQ Robotics 模块未加载');
+            return;
+        }
+        
+        try {
+            const angle = Math.PI / 128;
+            const directionSign = direction === 'positive' ? 1 : -1;
+            const rotationAngle = angle * directionSign;
+            
+            const dqCurrentArray = window.robot2.fkm(window.jointAngles2);
+            const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
+            
+            let rotationDQ;
+            if (axis === 'rx') {
+                rotationDQ = window.DQModule.DQWrapper.rotation(rotationAngle, 1, 0, 0);
+            } else if (axis === 'ry') {
+                rotationDQ = window.DQModule.DQWrapper.rotation(rotationAngle, 0, 1, 0);
+            } else if (axis === 'rz') {
+                rotationDQ = window.DQModule.DQWrapper.rotation(rotationAngle, 0, 0, 1);
+            } else {
+                console.error('无效的旋转轴名称:', axis);
+                return;
+            }
+            
+            const dqTarget = this.combineDQWithTeachOrder(rotationDQ, dqCurrent, false);
+            const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
+            
+            this.updateRobot2JointsWithPseudoInverse(dqTargetArray);
+        } catch (error) {
+            console.error('旋转机器人2末端执行器失败:', error);
+        }
+    }
+    
+    /**
+     * 从机器人1末端执行器位移更新关节角度
+     * @param {THREE.Vector3} delta - 末端执行器的位移（世界坐标系，单位：米）
+     */
+    updateRobot1JointsFromEndEffectorDelta(delta) {
+        if (!window.robot1 || !window.jointAngles1 || window.jointAngles1.length === 0) return;
+        
+        try {
+            if (!window.DQModule || !window.DQModule.DQWrapper) {
+                console.error('DQ Robotics 模块未加载');
+                return;
+            }
+            
+            const dqCurrentArray = window.robot1.fkm(window.jointAngles1);
+            if (!dqCurrentArray || dqCurrentArray.length !== 8) {
+                console.error('无法获取当前位姿');
+                return;
+            }
+            
+            const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
+            const { multiply } = window.DQModule.DQWrapper;
+            const worldMode = this.isWorldTranslationMode();
+            let dqDelta;
+            let dqTarget;
+            if (worldMode) {
+                dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
+                dqTarget = multiply(dqDelta, dqCurrent);
+            } else {
+                const rotationArray = window.DQModule.DQWrapper.getRotation(dqCurrent);
+                const rotationQuat = new THREE.Quaternion(
+                    rotationArray[1] || 0,
+                    rotationArray[2] || 0,
+                    rotationArray[3] || 0,
+                    rotationArray[0] || 1
+                );
+                const deltaLocal = delta.clone().applyQuaternion(rotationQuat.clone().conjugate());
+                dqDelta = window.DQModule.DQWrapper.translation(deltaLocal.x, deltaLocal.y, deltaLocal.z);
+                dqTarget = multiply(dqCurrent, dqDelta);
+            }
+            const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
+            
+            this.updateRobot1JointsWithPseudoInverse(dqTargetArray);
+        } catch (error) {
+            console.error('更新机器人1关节角度失败:', error);
+        }
+    }
+    
+    /**
+     * 从机器人2末端执行器位移更新关节角度
+     * @param {THREE.Vector3} delta - 末端执行器的位移（世界坐标系，单位：米）
+     */
+    updateRobot2JointsFromEndEffectorDelta(delta) {
+        if (!window.robot2 || !window.jointAngles2 || window.jointAngles2.length === 0) return;
+        
+        try {
+            if (!window.DQModule || !window.DQModule.DQWrapper) {
+                console.error('DQ Robotics 模块未加载');
+                return;
+            }
+            
+            const dqCurrentArray = window.robot2.fkm(window.jointAngles2);
+            if (!dqCurrentArray || dqCurrentArray.length !== 8) {
+                console.error('无法获取当前位姿');
+                return;
+            }
+            
+            const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
+            const { multiply } = window.DQModule.DQWrapper;
+            const worldMode = this.isWorldTranslationMode();
+            let dqDelta;
+            let dqTarget;
+            if (worldMode) {
+                dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
+                dqTarget = multiply(dqDelta, dqCurrent);
+            } else {
+                const rotationArray = window.DQModule.DQWrapper.getRotation(dqCurrent);
+                const rotationQuat = new THREE.Quaternion(
+                    rotationArray[1] || 0,
+                    rotationArray[2] || 0,
+                    rotationArray[3] || 0,
+                    rotationArray[0] || 1
+                );
+                const deltaLocal = delta.clone().applyQuaternion(rotationQuat.clone().conjugate());
+                dqDelta = window.DQModule.DQWrapper.translation(deltaLocal.x, deltaLocal.y, deltaLocal.z);
+                dqTarget = multiply(dqCurrent, dqDelta);
+            }
+            const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
+            
+            this.updateRobot2JointsWithPseudoInverse(dqTargetArray);
+        } catch (error) {
+            console.error('更新机器人2关节角度失败:', error);
+        }
+    }
+    
+    /**
+     * 使用伪逆更新机器人1关节角度
+     * @param {number[]} dqTargetArray - 目标位姿（8元素双四元数）
+     */
+    updateRobot1JointsWithPseudoInverse(dqTargetArray) {
+        if (!window.robot1 || !window.jointAngles1 || window.jointAngles1.length === 0) return;
+        
+        const epsilon = 0.00001;
+        const maxIterations = 50;
+        const damping = 0.5;
+        
+        let q = [...window.jointAngles1];
+        let errNorm = epsilon + 1;
+        let iteration = 0;
+        
+        while (errNorm > epsilon && iteration < maxIterations) {
+            const dqCurrentIterArray = window.robot1.fkm(q);
+            const err = [];
+            for (let i = 0; i < 8; i++) {
+                err.push(dqTargetArray[i] - dqCurrentIterArray[i]);
+            }
+            
+            errNorm = Math.sqrt(err.reduce((sum, e) => sum + e * e, 0));
+            if (errNorm <= epsilon) break;
+            
+            const jacobian = window.robot1.poseJacobian(q);
+            if (!jacobian || jacobian.length !== 8) {
+                console.error('雅可比矩阵维度错误');
+                return;
+            }
+            
+            const jacobianPseudoInv = this.pseudoInverse(jacobian);
+            const deltaJoints = [];
+            for (let i = 0; i < jacobianPseudoInv.length; i++) {
+                let sum = 0;
+                for (let j = 0; j < err.length; j++) {
+                    sum += jacobianPseudoInv[i][j] * err[j] * damping;
+                }
+                deltaJoints.push(sum);
+            }
+            
+            for (let i = 0; i < q.length && i < deltaJoints.length; i++) {
+                q[i] += deltaJoints[i];
+            }
+            
+            iteration++;
+        }
+        
+        if (window.customRobotConfig?.robot1) {
+            const jointNames = window.customRobotConfig.robot1.joint_chain?.joints || [];
+            if (jointNames.length === q.length && window.clampJointAngles) {
+                q = window.clampJointAngles(q, jointNames, this.robot1URDF, window.customRobotConfig.robot1);
+            }
+        }
+        
+        for (let i = 0; i < window.jointAngles1.length && i < q.length; i++) {
+            window.jointAngles1[i] = q[i];
+        }
+        
+        if (window.updateGlobalVariables) window.updateGlobalVariables();
+        if (window.updateRobotPose) window.updateRobotPose();
+    }
+    
+    /**
+     * 使用伪逆更新机器人2关节角度
+     * @param {number[]} dqTargetArray - 目标位姿（8元素双四元数）
+     */
+    updateRobot2JointsWithPseudoInverse(dqTargetArray) {
+        if (!window.robot2 || !window.jointAngles2 || window.jointAngles2.length === 0) return;
+        
+        const epsilon = 0.00001;
+        const maxIterations = 50;
+        const damping = 0.5;
+        
+        let q = [...window.jointAngles2];
+        let errNorm = epsilon + 1;
+        let iteration = 0;
+        
+        while (errNorm > epsilon && iteration < maxIterations) {
+            const dqCurrentIterArray = window.robot2.fkm(q);
+            const err = [];
+            for (let i = 0; i < 8; i++) {
+                err.push(dqTargetArray[i] - dqCurrentIterArray[i]);
+            }
+            
+            errNorm = Math.sqrt(err.reduce((sum, e) => sum + e * e, 0));
+            if (errNorm <= epsilon) break;
+            
+            const jacobian = window.robot2.poseJacobian(q);
+            if (!jacobian || jacobian.length !== 8) {
+                console.error('雅可比矩阵维度错误');
+                return;
+            }
+            
+            const jacobianPseudoInv = this.pseudoInverse(jacobian);
+            const deltaJoints = [];
+            for (let i = 0; i < jacobianPseudoInv.length; i++) {
+                let sum = 0;
+                for (let j = 0; j < err.length; j++) {
+                    sum += jacobianPseudoInv[i][j] * err[j] * damping;
+                }
+                deltaJoints.push(sum);
+            }
+            
+            for (let i = 0; i < q.length && i < deltaJoints.length; i++) {
+                q[i] += deltaJoints[i];
+            }
+            
+            iteration++;
+        }
+        
+        if (window.customRobotConfig?.robot2) {
+            const jointNames = window.customRobotConfig.robot2.joint_chain?.joints || [];
+            if (jointNames.length === q.length && window.clampJointAngles) {
+                q = window.clampJointAngles(q, jointNames, this.robot2URDF, window.customRobotConfig.robot2);
+            }
+        }
+        
+        for (let i = 0; i < window.jointAngles2.length && i < q.length; i++) {
+            window.jointAngles2[i] = q[i];
+        }
+        
+        if (window.updateGlobalVariables) window.updateGlobalVariables();
+        if (window.updateRobotPose) window.updateRobotPose();
+    }
+    
+    /**
      * 使用双四元数方式和雅可比伪逆从末端执行器位移更新关节角度
      * 
      * 参考 MATLAB 代码 cdts_bucket_kuka.m 的实现方式：
@@ -3049,11 +3275,26 @@ export class RobotVisualizer {
             // 2. 创建位移的平移双四元数：dq_delta = 1 + DQ.E*0.5*DQ([0, dx, dy, dz])
             // 参考 MATLAB: dqad = (1+DQ.E*0.5*(-0.1*DQ.i-0.1*DQ.j-0.1*DQ.k)) * dqad_ant
             // 在 JavaScript 中，使用 DQWrapper.translation(dx, dy, dz) 创建
-            const dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
             const dqCurrent = window.DQModule.DQWrapper.createFromArray(dqCurrentArray);
-            
-            // 3. 计算目标位姿
-            const dqTarget = this.combineDQWithTeachOrder(dqDelta, dqCurrent);
+            const { multiply } = window.DQModule.DQWrapper;
+            const worldMode = this.isWorldTranslationMode();
+            let dqDelta;
+            let dqTarget;
+            if (worldMode) {
+                dqDelta = window.DQModule.DQWrapper.translation(delta.x, delta.y, delta.z);
+                dqTarget = multiply(dqDelta, dqCurrent);
+            } else {
+                const rotationArray = window.DQModule.DQWrapper.getRotation(dqCurrent);
+                const rotationQuat = new THREE.Quaternion(
+                    rotationArray[1] || 0,
+                    rotationArray[2] || 0,
+                    rotationArray[3] || 0,
+                    rotationArray[0] || 1
+                );
+                const deltaLocal = delta.clone().applyQuaternion(rotationQuat.clone().conjugate());
+                dqDelta = window.DQModule.DQWrapper.translation(deltaLocal.x, deltaLocal.y, deltaLocal.z);
+                dqTarget = multiply(dqCurrent, dqDelta);
+            }
             
             // 4. 保存目标位姿数组
             const dqTargetArray = window.DQModule.DQWrapper.toArray(dqTarget);
@@ -3314,5 +3555,403 @@ export class RobotVisualizer {
             [(f * g - d * i) * invDet, (a * i - c * g) * invDet, (c * d - a * f) * invDet],
             [(d * h - e * g) * invDet, (b * g - a * h) * invDet, (a * e - b * d) * invDet]
         ];
+    }
+
+    /**
+     * 添加一个环境箱体
+     * @param {Object} options
+     * @param {string} options.id - 唯一标识
+     * @param {number} options.width - X 方向尺寸（米）
+     * @param {number} options.depth - Y 方向尺寸（米）
+     * @param {number} options.height - Z 方向尺寸（米）
+     * @param {number} [options.color=0xf97316] - 箱子颜色
+     * @param {number} [options.opacity=0.9] - 透明度
+     * @param {{x:number,y:number,z:number}} [options.position] - 箱子中心位置（米）
+     * @returns {THREE.Mesh|null}
+     */
+    addEnvironmentBox({
+        id,
+        width,
+        depth,
+        height,
+        color = 0xf97316,
+        opacity = 0.9,
+        position = {}
+    } = {}) {
+        if (!id || !Number.isFinite(width) || !Number.isFinite(depth) || !Number.isFinite(height)) {
+            console.warn('添加环境箱体失败：参数不完整');
+            return null;
+        }
+        if (!this.environmentGroup) {
+            console.warn('环境组尚未创建，无法添加环境物体');
+            return null;
+        }
+
+        // 如果已存在同名对象，先移除
+        if (this.environmentObjects.has(id)) {
+            this.removeEnvironmentObject(id);
+        }
+
+        const geometry = new THREE.BoxGeometry(width, depth, height);
+        const material = new THREE.MeshStandardMaterial({
+            color,
+            transparent: true,
+            opacity,
+            roughness: 0.35,
+            metalness: 0.05
+        });
+
+        const boxMesh = new THREE.Mesh(geometry, material);
+        boxMesh.castShadow = true;
+        boxMesh.receiveShadow = true;
+        boxMesh.name = `env-box-${id}`;
+        boxMesh.userData = {
+            environmentId: id,
+            environmentType: 'box',
+            dimensions: { width, depth, height },
+            attachedTo: null,
+            offset: {
+                position: { x: 0, y: 0, z: 0 },
+                rotationDeg: { x: 0, y: 0, z: 0 }
+            }
+        };
+
+        const centerZ = Number.isFinite(position?.z) ? position.z : height / 2;
+        boxMesh.position.set(position?.x ?? 0, position?.y ?? 0, centerZ);
+
+        this.environmentGroup.add(boxMesh);
+        this.environmentObjects.set(id, boxMesh);
+
+        console.log(`✓ 已添加环境箱体 ${id}，尺寸: ${width.toFixed(3)} × ${depth.toFixed(3)} × ${height.toFixed(3)} (m)`);
+        return boxMesh;
+    }
+
+    /**
+     * 移除指定环境物体
+     * @param {string} id - 环境物体的唯一标识
+     * @returns {boolean} 是否成功移除
+     */
+    removeEnvironmentObject(id) {
+        if (!id || !this.environmentObjects.has(id)) {
+            return false;
+        }
+        const object = this.environmentObjects.get(id);
+        if (object) {
+            this.detachEnvironmentObject(id);
+            if (this.environmentGroup) {
+                this.environmentGroup.remove(object);
+            }
+            this.disposeObjectResources(object);
+        }
+        this.environmentObjects.delete(id);
+        return true;
+    }
+
+    /**
+     * 清空所有环境物体
+     */
+    clearEnvironmentObjects() {
+        if (!this.environmentObjects.size) {
+            return;
+        }
+        const ids = Array.from(this.environmentObjects.keys());
+        ids.forEach((id) => {
+            this.removeEnvironmentObject(id);
+        });
+        this.environmentObjects.clear();
+    }
+
+    /**
+     * 获取主要末端执行器标记
+     * @returns {THREE.Object3D|null}
+     */
+    getPrimaryEndEffectorAnchor() {
+        if (this.endEffector) {
+            return this.endEffector;
+        }
+        if (this.dualArmMode) {
+            const activeMode = typeof window !== 'undefined' ? window.currentDualArmControlMode : null;
+            if (activeMode === 'robot2' && this.robot2EndEffector) {
+                return this.robot2EndEffector;
+            }
+            if (this.robot1EndEffector) {
+                return this.robot1EndEffector;
+            }
+            if (this.robot2EndEffector) {
+                return this.robot2EndEffector;
+            }
+        } else {
+            if (this.robot1EndEffector) {
+                return this.robot1EndEffector;
+            }
+            if (this.robot2EndEffector) {
+                return this.robot2EndEffector;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 判断是否存在末端执行器锚点
+     * @returns {boolean}
+     */
+    hasEndEffectorAnchor() {
+        return !!(this.endEffector || this.robot1EndEffector || this.robot2EndEffector);
+    }
+
+    /**
+     * 判断是否存在双臂绝对姿态标记
+     * @returns {boolean}
+     */
+    hasAbsolutePoseMarker() {
+        return !!this.absolutePoseMarker;
+    }
+
+    /**
+     * 将环境物体附着到指定锚点
+     * @param {string} id - 环境物体 ID
+     * @param {{target?: 'end-effector'|'dual-absolute'}} options
+     * @returns {boolean}
+     */
+    attachEnvironmentObject(id, options = {}) {
+        const target = options.target || 'end-effector';
+        if (!this.environmentObjects.has(id)) {
+            throw new Error(`未找到环境物体 ${id}`);
+        }
+        const object = this.environmentObjects.get(id);
+        let anchor = null;
+
+        if (target === 'dual-absolute') {
+            if (!this.dualArmMode || !this.absolutePoseMarker) {
+                throw new Error('当前没有可用的双臂绝对姿态小球');
+            }
+            anchor = this.absolutePoseMarker;
+        } else if (target === 'end-effector') {
+            anchor = this.getPrimaryEndEffectorAnchor();
+            if (!anchor) {
+                throw new Error('当前没有可用的末端执行器小球');
+            }
+        } else {
+            throw new Error(`未知的附着目标: ${target}`);
+        }
+
+        const savedScale = this._tempScale.set(object.scale.x, object.scale.y, object.scale.z);
+        anchor.add(object);
+        object.position.set(0, 0, 0);
+        object.quaternion.identity();
+        object.scale.copy(savedScale);
+        anchor.updateMatrixWorld(true);
+        object.updateMatrixWorld(true);
+
+        if (!object.userData) {
+            object.userData = {};
+        }
+        object.userData.attachedTo = target;
+        if (!object.userData.offset) {
+            object.userData.offset = {
+                position: { x: 0, y: 0, z: 0 },
+                rotationDeg: { x: 0, y: 0, z: 0 }
+            };
+        }
+        this.applyEnvironmentObjectOffset(id);
+        return true;
+    }
+
+    /**
+     * 解除环境物体的附着
+     * @param {string} id - 环境物体 ID
+     * @returns {boolean}
+     */
+    detachEnvironmentObject(id) {
+        if (!this.environmentObjects.has(id) || !this.environmentGroup) {
+            return false;
+        }
+        const object = this.environmentObjects.get(id);
+        object.getWorldPosition(this._tempVec3);
+        object.getWorldQuaternion(this._tempQuat);
+        object.getWorldScale(this._tempScale);
+
+        this.environmentGroup.add(object);
+        object.position.copy(this._tempVec3);
+        object.quaternion.copy(this._tempQuat);
+        object.scale.copy(this._tempScale);
+        object.updateMatrixWorld(true);
+
+        if (object.userData) {
+            object.userData.attachedTo = null;
+        }
+        return true;
+    }
+
+    /**
+     * 解除所有环境物体附着
+     */
+    detachAllEnvironmentObjects() {
+        if (!this.environmentObjects.size) {
+            return;
+        }
+        const ids = Array.from(this.environmentObjects.keys());
+        ids.forEach((id) => {
+            this.detachEnvironmentObject(id);
+        });
+    }
+
+    /**
+     * 根据存储的偏移应用局部变换
+     * @param {string} id
+     * @returns {boolean}
+     */
+    applyEnvironmentObjectOffset(id) {
+        if (!this.environmentObjects.has(id)) {
+            return false;
+        }
+        const object = this.environmentObjects.get(id);
+        const offset = object.userData?.offset;
+        if (!offset) {
+            return false;
+        }
+
+        const pos = offset.position || { x: 0, y: 0, z: 0 };
+        object.position.set(pos.x || 0, pos.y || 0, pos.z || 0);
+
+        const rotDeg = offset.rotationDeg || { x: 0, y: 0, z: 0 };
+        this._tempEuler.set(
+            THREE.MathUtils.degToRad(rotDeg.x || 0),
+            THREE.MathUtils.degToRad(rotDeg.y || 0),
+            THREE.MathUtils.degToRad(rotDeg.z || 0),
+            'XYZ'
+        );
+        object.quaternion.setFromEuler(this._tempEuler);
+        object.updateMatrixWorld(true);
+        return true;
+    }
+
+    /**
+     * 设置环境物体的局部偏移
+     * @param {string} id
+     * @param {{position?:{x:number,y:number,z:number},rotation?:{x:number,y:number,z:number}}} offset
+     * @returns {{position:{x:number,y:number,z:number},rotation:{x:number,y:number,z:number}}}
+     */
+    setEnvironmentObjectOffset(id, offset = {}) {
+        if (!this.environmentObjects.has(id)) {
+            throw new Error(`未找到环境物体 ${id}`);
+        }
+        const object = this.environmentObjects.get(id);
+        if (!object.userData) {
+            object.userData = {};
+        }
+        if (!object.userData.offset) {
+            object.userData.offset = {
+                position: { x: 0, y: 0, z: 0 },
+                rotationDeg: { x: 0, y: 0, z: 0 }
+            };
+        }
+
+        const current = object.userData.offset;
+
+        if (offset.position) {
+            const { x, y, z } = offset.position;
+            current.position = {
+                x: Number.isFinite(x) ? x : current.position.x,
+                y: Number.isFinite(y) ? y : current.position.y,
+                z: Number.isFinite(z) ? z : current.position.z
+            };
+        }
+
+        if (offset.rotation) {
+            const { x, y, z } = offset.rotation;
+            current.rotationDeg = {
+                x: Number.isFinite(x) ? x : current.rotationDeg.x,
+                y: Number.isFinite(y) ? y : current.rotationDeg.y,
+                z: Number.isFinite(z) ? z : current.rotationDeg.z
+            };
+        }
+
+        if (object.userData.attachedTo) {
+            this.applyEnvironmentObjectOffset(id);
+        }
+
+        return this.getEnvironmentObjectOffset(id);
+    }
+
+    /**
+     * 获取环境物体的偏移
+     * @param {string} id
+     * @returns {{position:{x:number,y:number,z:number},rotation:{x:number,y:number,z:number}}|null}
+     */
+    getEnvironmentObjectOffset(id) {
+        if (!this.environmentObjects.has(id)) {
+            return null;
+        }
+        const object = this.environmentObjects.get(id);
+        const offset = object.userData?.offset;
+        if (!offset) {
+            return {
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 }
+            };
+        }
+        return {
+            position: { ...offset.position },
+            rotation: { ...offset.rotationDeg }
+        };
+    }
+
+    /**
+     * 获取环境物体世界坐标
+     * @param {string} id
+     * @returns {THREE.Vector3|null}
+     */
+    getEnvironmentObjectWorldPosition(id) {
+        if (!this.environmentObjects.has(id)) {
+            return null;
+        }
+        const object = this.environmentObjects.get(id);
+        const position = new THREE.Vector3();
+        object.getWorldPosition(position);
+        return position;
+    }
+
+    /**
+     * 获取环境物体当前附着目标
+     * @param {string} id
+     * @returns {string|null}
+     */
+    getEnvironmentObjectAttachment(id) {
+        if (!this.environmentObjects.has(id)) {
+            return null;
+        }
+        const object = this.environmentObjects.get(id);
+        return object.userData?.attachedTo || null;
+    }
+
+    /**
+     * 释放 Three.js 对象资源
+     * @param {THREE.Object3D} object
+     * @private
+     */
+    disposeObjectResources(object) {
+        if (!object) {
+            return;
+        }
+        if (object.geometry && typeof object.geometry.dispose === 'function') {
+            object.geometry.dispose();
+        }
+        if (object.material) {
+            if (Array.isArray(object.material)) {
+                object.material.forEach((mat) => {
+                    if (mat && typeof mat.dispose === 'function') {
+                        mat.dispose();
+                    }
+                });
+            } else if (typeof object.material.dispose === 'function') {
+                object.material.dispose();
+            }
+        }
+        if (object.children && object.children.length > 0) {
+            for (let i = object.children.length - 1; i >= 0; i -= 1) {
+                this.disposeObjectResources(object.children[i]);
+            }
+        }
     }
 }

@@ -10,6 +10,7 @@ import { URDFPackageManager, loadURDFFromPackage } from './urdf-loader.js';
 
 const RAD_TO_DEG = 180 / Math.PI;
 const DEG_TO_RAD = Math.PI / 180;
+const CM_TO_M = 0.01;
 
 let angleDisplayMode = 'rad';
 let frankaConfigCache = null;
@@ -44,6 +45,22 @@ let robot2URDF = null;  // 机器人2（URDF）
 let jointAngles1 = [];  // 机器人1关节角度
 let jointAngles2 = [];  // 机器人2关节角度
 let dualArmSystem = null;  // CooperativeDualArm对象（用于计算绝对位姿）
+
+// 环境物体
+let environmentObjects = [];
+let environmentObjectCounter = 0;
+
+const DEFAULT_ENVIRONMENT_BOX_CM = {
+    length: 41.5,
+    width: 30.5,
+    height: 14
+};
+const DEFAULT_ENVIRONMENT_BOX_COLOR = 0xf97316;
+const ENVIRONMENT_BOX_BASE_OFFSET_X = 0.45; // 米
+
+if (typeof window !== 'undefined') {
+    window.currentDualArmControlMode = window.currentDualArmControlMode || 'absolute';
+}
 
 function angleToDisplay(angleRad) {
     if (!Number.isFinite(angleRad)) {
@@ -103,6 +120,109 @@ function buildJointAnglesClipboardText() {
     }
 
     return formatList(jointAngles);
+}
+
+function parseJointAngleArray(arrayStr) {
+    const trimmed = arrayStr.trim();
+    if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+        throw new Error('关节角度需使用 [ ] 表示数组');
+    }
+    try {
+        const arr = JSON.parse(trimmed);
+        if (!Array.isArray(arr)) {
+            throw new Error('解析结果不是数组');
+        }
+        return arr.map((value) => {
+            const num = Number(value);
+            if (!Number.isFinite(num)) {
+                throw new Error('数组中包含非数值项');
+            }
+            return num;
+        });
+    } catch (error) {
+        throw new Error(`无法解析关节角度数组: ${error.message}`);
+    }
+}
+
+function parseJointAnglesInput(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) {
+        throw new Error('未提供任何角度数据');
+    }
+
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        return { single: parseJointAngleArray(trimmed) };
+    }
+
+    const result = {};
+    const normalized = trimmed.replace(/\r\n/g, '\n');
+    const regex = /(robot1|robot2)\s*[:=]\s*(\[[^\]]*\])/gi;
+    let match;
+    while ((match = regex.exec(normalized)) !== null) {
+        const key = match[1].toLowerCase();
+        result[key] = parseJointAngleArray(match[2]);
+    }
+
+    if (Object.keys(result).length === 0) {
+        throw new Error('未检测到 robot1 或 robot2 的角度数组');
+    }
+
+    return result;
+}
+
+function importJointAnglesFromText(text) {
+    const parsed = parseJointAnglesInput(text);
+    const toRad = (value) => (angleDisplayMode === 'deg' ? value * DEG_TO_RAD : value);
+
+    if (dualArmMode) {
+        const arr1 = parsed.robot1 || parsed.single;
+        const arr2 = parsed.robot2;
+
+        if (!arr1 || !arr2) {
+            throw new Error('双臂模式需要同时提供 robot1 和 robot2 的角度数组');
+        }
+
+        if (arr1.length !== jointAngles1.length || arr2.length !== jointAngles2.length) {
+            throw new Error('导入数组长度与当前机器人关节数不匹配');
+        }
+
+        jointAngles1 = arr1.map(toRad);
+        jointAngles2 = arr2.map(toRad);
+
+        if (window.customRobotConfig?.robot1) {
+            const jointNames1 = window.customRobotConfig.robot1.joint_chain?.joints || [];
+            jointAngles1 = clampJointAngles(jointAngles1, jointNames1, visualizer?.robot1URDF || null, window.customRobotConfig.robot1);
+        }
+        if (window.customRobotConfig?.robot2) {
+            const jointNames2 = window.customRobotConfig.robot2.joint_chain?.joints || [];
+            jointAngles2 = clampJointAngles(jointAngles2, jointNames2, visualizer?.robot2URDF || null, window.customRobotConfig.robot2);
+        }
+
+        updateGlobalVariables();
+        updateRobotPose();
+        updateDualArmJointSlidersFromAngles();
+    } else {
+        const arr = parsed.single || parsed.robot1 || parsed.robot2;
+        if (!arr) {
+            throw new Error('单臂模式需要提供一个角度数组');
+        }
+        if (arr.length !== jointAngles.length) {
+            throw new Error('导入数组长度与当前机器人关节数不匹配');
+        }
+
+        jointAngles = arr.map(toRad);
+
+        const config = getActiveJointConfig();
+        const jointNames = config?.joint_chain?.joints || [];
+        const urdfRobot = visualizer?.urdfRobot || null;
+        if (jointNames.length === jointAngles.length) {
+            jointAngles = clampJointAngles(jointAngles, jointNames, urdfRobot, config);
+        }
+
+        updateGlobalVariables();
+        updateRobotPose();
+        updateJointSlidersFromAngles();
+    }
 }
 
 function formatJointLimitsForClipboard(lowerAngles = [], upperAngles = [], label = 'joint') {
@@ -941,6 +1061,10 @@ function updateGlobalVariables() {
     window.jointAngles1 = jointAngles1;
     window.jointAngles2 = jointAngles2;
     window.dualArmMode = dualArmMode;
+    window.robot1 = robot1;
+    window.robot2 = robot2;
+    window.robot1URDF = robot1URDF;
+    window.robot2URDF = robot2URDF;
 }
 
 /**
@@ -1909,6 +2033,380 @@ function updateJacobianDisplay() {
 }
 
 /**
+ * 渲染环境物体列表
+ */
+function renderEnvironmentObjectList() {
+    const list = document.getElementById('environment-object-list');
+    if (!list) {
+        return;
+    }
+
+    list.innerHTML = '';
+
+    if (!environmentObjects.length) {
+        const empty = document.createElement('div');
+        empty.className = 'env-empty-message';
+        empty.textContent = '当前场景没有环境物体';
+        list.appendChild(empty);
+        return;
+    }
+
+    environmentObjects.forEach((object) => {
+        // 同步可视化器中的最新附着及位置
+        if (visualizer?.getEnvironmentObjectAttachment) {
+            const currentAttachment = visualizer.getEnvironmentObjectAttachment(object.id);
+            object.attachedTo = currentAttachment || null;
+        }
+        if (visualizer?.getEnvironmentObjectWorldPosition) {
+            const worldPos = visualizer.getEnvironmentObjectWorldPosition(object.id);
+            if (worldPos) {
+                object.position = { x: worldPos.x, y: worldPos.y, z: worldPos.z };
+            }
+        }
+        if (visualizer?.getEnvironmentObjectOffset) {
+            const offset = visualizer.getEnvironmentObjectOffset(object.id);
+            if (offset) {
+                object.offset = offset;
+            }
+        }
+
+        const item = document.createElement('div');
+        item.className = 'env-object-item';
+
+        const info = document.createElement('div');
+        info.className = 'env-object-info';
+
+        const title = document.createElement('div');
+        title.className = 'env-object-title';
+        title.textContent = object.displayName || '环境物体';
+
+        const dimsCm = object.dimensionsCm || {};
+        const lengthCm = Number(dimsCm.length ?? 0).toFixed(1);
+        const widthCm = Number(dimsCm.width ?? 0).toFixed(1);
+        const heightCm = Number(dimsCm.height ?? 0).toFixed(1);
+
+        const dimensions = document.createElement('div');
+        dimensions.className = 'env-object-meta';
+        dimensions.textContent = `尺寸：${lengthCm} × ${widthCm} × ${heightCm} cm`;
+
+        const posInfo = document.createElement('div');
+        posInfo.className = 'env-object-meta';
+        const pos = object.position || { x: 0, y: 0, z: 0 };
+        posInfo.textContent = `位置 (m)：(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`;
+
+        const attachStatus = document.createElement('div');
+        attachStatus.className = 'env-object-meta';
+        attachStatus.textContent = `附着：${getEnvironmentAttachmentLabel(object.attachedTo)}`;
+
+        info.appendChild(title);
+        info.appendChild(dimensions);
+        info.appendChild(posInfo);
+        info.appendChild(attachStatus);
+        const offset = object.offset || {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 }
+        };
+        const offsetPos = offset.position || { x: 0, y: 0, z: 0 };
+        const offsetRot = offset.rotation || { x: 0, y: 0, z: 0 };
+        const offsetInfo = document.createElement('div');
+        offsetInfo.className = 'env-object-meta';
+        offsetInfo.textContent = `偏移(cm)：(${(offsetPos.x / CM_TO_M).toFixed(1)}, ${(offsetPos.y / CM_TO_M).toFixed(1)}, ${(offsetPos.z / CM_TO_M).toFixed(1)}) ｜ 旋转(°)：(${offsetRot.x.toFixed(1)}, ${offsetRot.y.toFixed(1)}, ${offsetRot.z.toFixed(1)})`;
+        info.appendChild(offsetInfo);
+
+        const controls = document.createElement('div');
+        controls.className = 'env-object-controls';
+
+        const attachmentOptions = getEnvironmentAttachmentOptions();
+        const attachSelect = document.createElement('select');
+        attachSelect.className = 'env-attach-select';
+        attachmentOptions.forEach((option) => {
+            const opt = document.createElement('option');
+            opt.value = option.value;
+            opt.textContent = option.label;
+            opt.disabled = option.disabled;
+            attachSelect.appendChild(opt);
+        });
+        const currentValue = object.attachedTo || 'none';
+        if (!attachmentOptions.some((opt) => opt.value === currentValue && !opt.disabled)) {
+            attachSelect.value = 'none';
+        } else {
+            attachSelect.value = currentValue;
+        }
+        attachSelect.addEventListener('change', (e) => {
+            updateEnvironmentAttachment(object.id, e.target.value);
+        });
+        controls.appendChild(attachSelect);
+
+        const adjustBtn = document.createElement('button');
+        adjustBtn.className = 'env-adjust-btn';
+        adjustBtn.textContent = '调整';
+        if (!object.attachedTo) {
+            adjustBtn.disabled = true;
+            adjustBtn.title = '附着后可调整偏移';
+        }
+        adjustBtn.addEventListener('click', () => {
+            promptEnvironmentObjectAdjustment(object.id);
+        });
+        controls.appendChild(adjustBtn);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'env-remove-btn';
+        removeBtn.textContent = '移除';
+        removeBtn.addEventListener('click', () => {
+            removeEnvironmentObjectEntry(object.id);
+        });
+        controls.appendChild(removeBtn);
+
+        item.appendChild(info);
+        item.appendChild(controls);
+        list.appendChild(item);
+    });
+}
+
+function getEnvironmentAttachmentLabel(value) {
+    switch (value) {
+        case 'end-effector':
+            return '末端小球';
+        case 'dual-absolute':
+            return '双臂绝对姿态小球';
+        default:
+            return '未附着';
+    }
+}
+
+function getEnvironmentAttachmentOptions() {
+    const options = [
+        { value: 'none', label: '未附着', disabled: false }
+    ];
+    const hasVisualizer = !!visualizer;
+    const hasEndEffector = hasVisualizer && typeof visualizer.hasEndEffectorAnchor === 'function'
+        ? visualizer.hasEndEffectorAnchor()
+        : false;
+    options.push({
+        value: 'end-effector',
+        label: '末端小球',
+        disabled: !hasEndEffector
+    });
+    const hasAbsolute = hasVisualizer && typeof visualizer.hasAbsolutePoseMarker === 'function'
+        ? visualizer.hasAbsolutePoseMarker()
+        : false;
+    if (hasAbsolute) {
+        options.push({
+            value: 'dual-absolute',
+            label: '双臂绝对姿态小球',
+            disabled: false
+        });
+    }
+    return options;
+}
+
+function promptEnvironmentObjectAdjustment(id) {
+    const entry = environmentObjects.find((item) => item.id === id);
+    if (!entry) {
+        return;
+    }
+    if (!entry.attachedTo) {
+        window.alert('请先将该物体附着到小球上，再进行调整。');
+        return;
+    }
+    if (!visualizer || typeof visualizer.setEnvironmentObjectOffset !== 'function') {
+        window.alert('当前可视化器不支持偏移调整');
+        return;
+    }
+
+    const offset = visualizer.getEnvironmentObjectOffset?.(id) || {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 }
+    };
+    const defaultInput = [
+        (offset.position.x / CM_TO_M).toFixed(2),
+        (offset.position.y / CM_TO_M).toFixed(2),
+        (offset.position.z / CM_TO_M).toFixed(2),
+        (offset.rotation.x || 0).toFixed(1),
+        (offset.rotation.y || 0).toFixed(1),
+        (offset.rotation.z || 0).toFixed(1)
+    ].join(', ');
+
+    const input = window.prompt(
+        '输入偏移与旋转，格式：dx, dy, dz, roll, pitch, yaw\n' +
+        'dx/dy/dz 单位为厘米，roll/pitch/yaw 单位为度。\n' +
+        '正方向遵循右手定则，旋转顺序为 XYZ。',
+        defaultInput
+    );
+    if (input === null) {
+        return;
+    }
+
+    const parts = input.split(/[,\s]+/).filter(Boolean);
+    if (parts.length !== 6) {
+        window.alert('请输入 6 个数值，格式示例：2, 0, 5, 0, 0, 90');
+        return;
+    }
+
+    const numbers = parts.map((value) => Number.parseFloat(value));
+    if (numbers.some((num) => Number.isNaN(num))) {
+        window.alert('输入包含非数值内容，请重新输入');
+        return;
+    }
+
+    const [dxCm, dyCm, dzCm, rollDeg, pitchDeg, yawDeg] = numbers;
+
+    try {
+        const updatedOffset = visualizer.setEnvironmentObjectOffset(id, {
+            position: {
+                x: dxCm * CM_TO_M,
+                y: dyCm * CM_TO_M,
+                z: dzCm * CM_TO_M
+            },
+            rotation: {
+                x: rollDeg,
+                y: pitchDeg,
+                z: yawDeg
+            }
+        });
+
+        entry.offset = {
+            position: { ...updatedOffset.position },
+            rotation: { ...updatedOffset.rotation }
+        };
+
+        if (typeof visualizer.getEnvironmentObjectWorldPosition === 'function') {
+            const worldPos = visualizer.getEnvironmentObjectWorldPosition(id);
+            if (worldPos) {
+                entry.position = { x: worldPos.x, y: worldPos.y, z: worldPos.z };
+            }
+        }
+
+        renderEnvironmentObjectList();
+    } catch (error) {
+        console.error('调整环境物体偏移失败:', error);
+        window.alert(`调整失败：${error.message}`);
+    }
+}
+
+function updateEnvironmentAttachment(id, targetValue) {
+    const entry = environmentObjects.find((item) => item.id === id);
+    if (!entry) {
+        return;
+    }
+
+    const normalized = targetValue === 'none' ? null : targetValue;
+
+    try {
+        if (!visualizer) {
+            throw new Error('可视化器尚未初始化');
+        }
+
+        if (!normalized) {
+            if (typeof visualizer.detachEnvironmentObject === 'function') {
+                visualizer.detachEnvironmentObject(id);
+            }
+            entry.attachedTo = null;
+        } else if (typeof visualizer.attachEnvironmentObject === 'function') {
+            visualizer.attachEnvironmentObject(id, { target: normalized });
+            entry.attachedTo = normalized;
+        } else {
+            throw new Error('可视化器未实现环境附着功能');
+        }
+
+        if (typeof visualizer.getEnvironmentObjectWorldPosition === 'function') {
+            const worldPos = visualizer.getEnvironmentObjectWorldPosition(id);
+            if (worldPos) {
+                entry.position = { x: worldPos.x, y: worldPos.y, z: worldPos.z };
+            }
+        }
+        if (typeof visualizer.getEnvironmentObjectOffset === 'function') {
+            const offset = visualizer.getEnvironmentObjectOffset(id);
+            if (offset) {
+                entry.offset = offset;
+            }
+        }
+    } catch (error) {
+        console.error('更新环境物体附着失败:', error);
+        window.alert(`更新附着失败：${error.message}`);
+    }
+
+    renderEnvironmentObjectList();
+}
+
+/**
+ * 添加默认环境箱体到场景
+ */
+function addEnvironmentBoxToScene() {
+    if (!visualizer || typeof visualizer.addEnvironmentBox !== 'function') {
+        throw new Error('可视化器尚未初始化，无法添加环境物体');
+    }
+
+    environmentObjectCounter += 1;
+
+    const dimsCm = DEFAULT_ENVIRONMENT_BOX_CM;
+    const dims = {
+        width: Number(dimsCm.length || 0) * CM_TO_M, // X 方向
+        depth: Number(dimsCm.width || 0) * CM_TO_M,  // Y 方向
+        height: Number(dimsCm.height || 0) * CM_TO_M // Z 方向
+    };
+
+    const spacing = Math.max(dims.width, dims.depth) + 0.15;
+    const position = {
+        x: ENVIRONMENT_BOX_BASE_OFFSET_X + (environmentObjectCounter - 1) * spacing,
+        y: 0,
+        z: dims.height / 2
+    };
+
+    const id = `env-box-${environmentObjectCounter}`;
+    const mesh = visualizer.addEnvironmentBox({
+        id,
+        width: dims.width,
+        depth: dims.depth,
+        height: dims.height,
+        color: DEFAULT_ENVIRONMENT_BOX_COLOR,
+        opacity: 0.92,
+        position
+    });
+
+    if (!mesh) {
+        environmentObjectCounter -= 1;
+        throw new Error('添加环境物体失败，返回值为空');
+    }
+
+    environmentObjects.push({
+        id,
+        type: 'box',
+        displayName: `箱子 #${environmentObjectCounter}`,
+        dimensionsCm: { ...dimsCm },
+        position,
+        attachedTo: null,
+        offset: {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 }
+        }
+    });
+
+    renderEnvironmentObjectList();
+    return mesh;
+}
+
+/**
+ * 移除环境物体
+ * @param {string} id
+ * @returns {boolean}
+ */
+function removeEnvironmentObjectEntry(id) {
+    const index = environmentObjects.findIndex((item) => item.id === id);
+    if (index === -1) {
+        return false;
+    }
+
+    if (visualizer && typeof visualizer.removeEnvironmentObject === 'function') {
+        visualizer.removeEnvironmentObject(id);
+    }
+
+    environmentObjects.splice(index, 1);
+    renderEnvironmentObjectList();
+    return true;
+}
+
+/**
  * 设置事件监听器
  */
 function setupEventListeners() {
@@ -1961,6 +2459,63 @@ function setupEventListeners() {
         });
     }
 
+    const importAnglesBtn = document.getElementById('import-joint-angles-btn');
+    if (importAnglesBtn) {
+        const defaultText = importAnglesBtn.textContent.trim();
+        importAnglesBtn.addEventListener('click', async () => {
+            let inputText = '';
+            importAnglesBtn.disabled = true;
+            try {
+                if (navigator?.clipboard?.readText) {
+                    inputText = await navigator.clipboard.readText();
+                    if (!inputText || !inputText.trim()) {
+                        throw new Error('剪贴板为空，无法导入关节角度');
+                    }
+                } else {
+                    const promptText = window.prompt('粘贴关节角度数组（支持直接粘贴复制的输出）：');
+                    if (promptText === null) {
+                        importAnglesBtn.disabled = false;
+                        return;
+                    }
+                    inputText = promptText;
+                }
+
+                importJointAnglesFromText(inputText);
+                importAnglesBtn.textContent = '导入成功';
+            } catch (error) {
+                console.error('导入关节角度失败:', error);
+                importAnglesBtn.textContent = '导入失败';
+                window.alert(`导入关节角度失败：${error.message}`);
+            } finally {
+                setTimeout(() => {
+                    importAnglesBtn.textContent = defaultText;
+                    importAnglesBtn.disabled = false;
+                }, 1500);
+            }
+        });
+    }
+
+    const addEnvironmentBoxBtn = document.getElementById('add-environment-box-btn');
+    if (addEnvironmentBoxBtn) {
+        const defaultLabel = addEnvironmentBoxBtn.textContent.trim();
+        addEnvironmentBoxBtn.addEventListener('click', () => {
+            addEnvironmentBoxBtn.disabled = true;
+            try {
+                addEnvironmentBoxToScene();
+                addEnvironmentBoxBtn.textContent = '已添加箱子';
+            } catch (error) {
+                console.error('添加环境箱体失败:', error);
+                addEnvironmentBoxBtn.textContent = '添加失败';
+                window.alert(`添加环境箱体失败：${error.message}`);
+            } finally {
+                setTimeout(() => {
+                    addEnvironmentBoxBtn.textContent = defaultLabel;
+                    addEnvironmentBoxBtn.disabled = false;
+                }, 1500);
+            }
+        });
+    }
+
     const copyAnglesBtn = document.getElementById('copy-joint-angles-btn');
     if (copyAnglesBtn) {
         const defaultCopyText = copyAnglesBtn.textContent.trim();
@@ -2007,8 +2562,8 @@ function setupEventListeners() {
     const updateTeachOrderStatus = (isDeltaFirst) => {
         if (!teachOrderStatus) return;
         teachOrderStatus.textContent = isDeltaFirst 
-            ? '当前模式：局部坐标（Δ × 当前）'
-            : '当前模式：世界坐标（当前 × Δ）';
+            ? '当前模式：局部坐标（当前 × Δ）'
+            : '当前模式：世界坐标（Δ × 当前）';
     };
     const applyTeachOrder = (isDeltaFirst) => {
         if (visualizer?.setTeachMultiplicationOrder) {
@@ -2042,35 +2597,57 @@ function setupEventListeners() {
             const isDualArm = visualizer.dualArmMode;
             
             if (isDualArm) {
-                // 检查是否为相对位姿模式
-                const relativeModeToggle = document.getElementById('dual-arm-relative-mode-toggle');
-                const isRelativeMode = relativeModeToggle && relativeModeToggle.checked;
+                // 获取控制模式选择器
+                const controlModeSelect = document.getElementById('dual-arm-control-mode-select');
+                const controlMode = controlModeSelect ? controlModeSelect.value : 'absolute';
                 
-                if (isRelativeMode) {
-                    // 双臂模式：控制相对位姿（保持绝对位姿不变）
+                if (controlMode === 'robot1') {
+                    // 控制机器人1
                     if (type === 'rotation') {
-                        // 旋转控制
+                        visualizer.rotateRobot1EndEffectorAroundAxis(axis, direction);
+                        intervalId = setInterval(() => {
+                            visualizer.rotateRobot1EndEffectorAroundAxis(axis, direction);
+                        }, 20);
+                    } else {
+                        visualizer.moveRobot1EndEffectorAlongAxis(axis, direction);
+                        intervalId = setInterval(() => {
+                            visualizer.moveRobot1EndEffectorAlongAxis(axis, direction);
+                        }, 20);
+                    }
+                } else if (controlMode === 'robot2') {
+                    // 控制机器人2
+                    if (type === 'rotation') {
+                        visualizer.rotateRobot2EndEffectorAroundAxis(axis, direction);
+                        intervalId = setInterval(() => {
+                            visualizer.rotateRobot2EndEffectorAroundAxis(axis, direction);
+                        }, 20);
+                    } else {
+                        visualizer.moveRobot2EndEffectorAlongAxis(axis, direction);
+                        intervalId = setInterval(() => {
+                            visualizer.moveRobot2EndEffectorAlongAxis(axis, direction);
+                        }, 20);
+                    }
+                } else if (controlMode === 'relative') {
+                    // 控制相对位姿（保持绝对位姿不变）
+                    if (type === 'rotation') {
                         visualizer.rotateDualArmRelativePoseAroundAxis(axis, direction);
                         intervalId = setInterval(() => {
                             visualizer.rotateDualArmRelativePoseAroundAxis(axis, direction);
                         }, 20);
                     } else {
-                        // 平移控制
                         visualizer.moveDualArmRelativePoseAlongAxis(axis, direction);
                         intervalId = setInterval(() => {
                             visualizer.moveDualArmRelativePoseAlongAxis(axis, direction);
                         }, 20);
                     }
                 } else {
-                    // 双臂模式：控制绝对位姿（保持相对位姿不变）
+                    // 默认：控制绝对位姿（保持相对位姿不变）
                     if (type === 'rotation') {
-                        // 旋转控制
                         visualizer.rotateDualArmAbsolutePoseAroundAxis(axis, direction);
                         intervalId = setInterval(() => {
                             visualizer.rotateDualArmAbsolutePoseAroundAxis(axis, direction);
                         }, 20);
                     } else {
-                        // 平移控制
                         visualizer.moveDualArmAbsolutePoseAlongAxis(axis, direction);
                         intervalId = setInterval(() => {
                             visualizer.moveDualArmAbsolutePoseAlongAxis(axis, direction);
@@ -2111,6 +2688,7 @@ function setupEventListeners() {
     });
     
     // 全局拖拽加载
+    renderEnvironmentObjectList();
     setupGlobalDragAndDrop();
     
     // 浮动面板与底部功能栏
@@ -3245,23 +3823,42 @@ function switchToDualArmUI() {
         dualArmControlMode.style.display = 'block';
     }
     
-    // 设置模式切换开关的事件监听器
-    const relativeModeToggle = document.getElementById('dual-arm-relative-mode-toggle');
+    // 设置控制模式选择器的事件监听器
+    const controlModeSelect = document.getElementById('dual-arm-control-mode-select');
     const modeLabel = document.getElementById('dual-arm-mode-label');
-    if (relativeModeToggle && modeLabel) {
-        relativeModeToggle.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                modeLabel.textContent = '相对位姿模式：控制相对位姿，保持绝对位姿不变';
-            } else {
-                modeLabel.textContent = '绝对位姿模式：控制绝对位姿，保持相对位姿不变';
+    if (controlModeSelect && modeLabel) {
+        const updateModeLabel = () => {
+            const mode = controlModeSelect.value;
+            if (typeof window !== 'undefined') {
+                window.currentDualArmControlMode = mode;
             }
-        });
+            switch (mode) {
+                case 'robot1':
+                    modeLabel.textContent = '机器人1模式：控制机器人1的末端执行器';
+                    break;
+                case 'robot2':
+                    modeLabel.textContent = '机器人2模式：控制机器人2的末端执行器';
+                    break;
+                case 'relative':
+                    modeLabel.textContent = '相对位姿模式：控制相对位姿，保持绝对位姿不变';
+                    break;
+                case 'absolute':
+                default:
+                    modeLabel.textContent = '绝对位姿模式：控制绝对位姿，保持相对位姿不变';
+                    break;
+            }
+            renderEnvironmentObjectList();
+        };
+        updateModeLabel();
+        controlModeSelect.addEventListener('change', updateModeLabel);
     }
     
     // 更新标签页，确保显示正确的标签内容
     if (dualArmPose && document.querySelector('[data-tab="pose"]')) {
         switchTab('pose');
     }
+
+    renderEnvironmentObjectList();
 }
 
 /**
@@ -3286,6 +3883,12 @@ function switchToSingleArmUI() {
     if (dualArmControlMode) {
         dualArmControlMode.style.display = 'none';
     }
+
+    if (typeof window !== 'undefined') {
+        window.currentDualArmControlMode = 'absolute';
+    }
+
+    renderEnvironmentObjectList();
 }
 
 // 页面加载完成后初始化
